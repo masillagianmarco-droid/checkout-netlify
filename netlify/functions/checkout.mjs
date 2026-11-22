@@ -19,7 +19,19 @@ const offers = new Map([
     name: 'OspitaBene · Kit Annuncio',
     price: '49.00',
     currency: 'EUR',
-    description: 'Ottimizzazione del titolo e della descrizione in italiano e inglese. Include una revisione.',
+    description: 'Ottimizzazione del titolo e della descrizione in italiano e inglese per una piattaforma. Include una revisione.',
+  }],
+  ['ospitabene-kit-completo', {
+    name: 'OspitaBene · Kit Ospitalità Completo',
+    price: '99.00',
+    currency: 'EUR',
+    description: 'Ottimizzazione degli annunci Airbnb e Booking, guida ospiti, otto messaggi e dieci modelli per le recensioni. Include due revisioni.',
+  }],
+  ['ospitabene-kit-completo-lancio', {
+    name: 'OspitaBene · Kit Ospitalità Completo — Offerta di lancio',
+    price: '49.00',
+    currency: 'EUR',
+    description: 'Kit Ospitalità Completo al prezzo di lancio, riservato agli ordini per cui OspitaBene ha confermato la promozione.',
   }],
 ]);
 const nonceFormat = /^[a-f0-9]{32}$/;
