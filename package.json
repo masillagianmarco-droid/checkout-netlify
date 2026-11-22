@@ -1,0 +1,6 @@
+{
+  "name": "checkout-netlify",
+  "private": true,
+  "scripts": { "test": "node --test" },
+  "dependencies": { "@netlify/blobs": "11.1.9" }
+}
