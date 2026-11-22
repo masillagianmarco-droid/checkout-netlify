@@ -29,3 +29,13 @@ node scripts/crea-link-ordine.mjs https://il-tuo-checkout.netlify.app ospitabene
 Il link scade dopo quattro ore. Il registro Netlify Blobs riserva una sola operazione di creazione PayPal per riferimento d’ordine e conserva i dati necessari per ripeterla in modo idempotente entro la finestra supportata da PayPal. Il riferimento viene riportato nell’ordine PayPal. Prima di evadere un ordine o inviare un nuovo link dopo una scadenza, verifica lo stato della transazione nel pannello PayPal.
 
 La consegna per OspitaBene è manuale. I prodotti digitali dovranno essere configurati con il loro flusso di consegna e con la verifica degli eventi di pagamento.
+
+## Offerte OspitaBene
+
+| Offerta | Codice per il checkout | Prezzo |
+| --- | --- | ---: |
+| Kit Annuncio | `ospitabene-kit-annuncio` | 49,00 EUR |
+| Kit Ospitalità Completo | `ospitabene-kit-completo` | 99,00 EUR |
+| Kit Ospitalità Completo, promozione su conferma | `ospitabene-kit-completo-lancio` | 49,00 EUR |
+
+La promozione richiede la conferma della disponibilità prima di emettere il link. Per Recensioni Serene, a 19 EUR al mese, occorre un piano di abbonamento con gestione delle disdette. Il modulo OspitaBene continua a raccogliere le richieste di preventivo.
