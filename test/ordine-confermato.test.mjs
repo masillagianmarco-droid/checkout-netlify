@@ -69,3 +69,26 @@ test('la pagina Live richiede un ordine firmato; le anteprime usano Sandbox', as
   assert.equal(test.status, 200);
   assert.match(await test.text(), /Pagamento di prova/);
 });
+
+test('le due offerte del Kit Completo hanno prezzi distinti e link non intercambiabili', async t => {
+  const env = {
+    PAYPAL_LIVE_ENABLED: 'true',
+    PAYPAL_LIVE_CLIENT_ID: 'test-live-id',
+    PAYPAL_LIVE_CLIENT_SECRET: 'test-live-secret',
+    CHECKOUT_ORDER_SIGNING_KEY: signingKey,
+  };
+  Object.assign(process.env, env);
+  t.after(() => Object.keys(env).forEach(key => delete process.env[key]));
+  const liveContext = { deploy: { context: 'production' } };
+  const regular = 'ospitabene-kit-completo';
+  const launch = 'ospitabene-kit-completo-lancio';
+  const launchToken = signOrder(launch, 'OSP-002', signingKey);
+  const getOffer = (offerCode, orderToken) => checkout(
+    new Request(`${origin}/checkout?offerta=${offerCode}&ordine=${orderToken}`),
+    liveContext,
+  );
+
+  assert.match(await (await getOffer(regular, signOrder(regular, 'OSP-003', signingKey))).text(), /99,00 €/);
+  assert.match(await (await getOffer(launch, launchToken)).text(), /49,00 €/);
+  assert.equal((await getOffer(regular, launchToken)).status, 403);
+});
