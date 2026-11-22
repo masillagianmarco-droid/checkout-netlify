@@ -1,0 +1,32 @@
+:root {
+  color-scheme: light;
+  color: #142728;
+  background: #f1f5f3;
+  font-family: system-ui, sans-serif;
+}
+body { margin: 0; }
+main {
+  max-width: 35rem;
+  margin: clamp(1rem, 10vh, 6rem) auto;
+  padding: clamp(1.5rem, 5vw, 3.25rem);
+  border: 1px solid #c5d4cb;
+  border-radius: 1.1rem;
+  background: white;
+}
+h1 { line-height: 1.15; }
+p { line-height: 1.55; }
+.mode { color: #425c52; font-size: .95rem; }
+.price { font-size: 1.8rem; font-weight: 700; }
+button {
+  padding: .85rem 1.15rem;
+  border: 0;
+  border-radius: .55rem;
+  color: white;
+  background: #145440;
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+a { color: #145440; }
+:focus-visible { outline: 3px solid #175ca2; outline-offset: 4px; }
+@media (max-width: 43rem) { main { margin-inline: 1rem; } }
