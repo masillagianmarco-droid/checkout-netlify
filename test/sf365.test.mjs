@@ -134,15 +134,41 @@ test('vendite reali bloccate senza autorizzazione esplicita e prodotto live', as
   delete process.env.PAYPAL_LIVE_ENABLED; delete process.env.PAYPAL_LIVE_CLIENT_ID; delete process.env.PAYPAL_LIVE_CLIENT_SECRET; delete process.env.CHECKOUT_ORDER_SIGNING_KEY;
 });
 
-test('Paddle: firma HMAC verificata e consegna dopo transaction.completed', async () => {
+test('Paddle: firma HMAC verificata e consegna solo con il prezzo registrato per lo sku', async () => {
   process.env.PADDLE_WEBHOOK_SECRET = 'pdl_ntfset_test';
-  const ev = { event_id: 'evt_1', event_type: 'transaction.completed', data: { id: 'txn_01abcdefghij', currency_code: 'EUR', custom_data: { sku }, items: [], details: { totals: { grand_total: '3900' } } } };
-  const raw = JSON.stringify(ev), ts = Math.floor(Date.now() / 1000);
-  const h1 = createHmac('sha256', process.env.PADDLE_WEBHOOK_SECRET).update(`${ts}:${raw}`).digest('hex');
-  assert.equal((await paddleFn(req('/api/paddle/webhook', 'POST', { 'paddle-signature': `ts=${ts};h1=${'0'.repeat(64)}` }, raw), { params: { action: 'webhook' } })).status, 400);
-  assert.equal((await paddleFn(req('/api/paddle/webhook', 'POST', { 'paddle-signature': `ts=${ts};h1=${h1}` }, raw), { params: { action: 'webhook' } })).status, 200);
-  const d = await paddleFn(req('/api/paddle/delivery?txn=txn_01abcdefghij'), { params: { action: 'delivery' } });
+  const send = async (id, items) => {
+    const ev = { event_id: 'evt_' + id, event_type: 'transaction.completed', data: { id, currency_code: 'EUR', custom_data: { sku }, items, details: { totals: { grand_total: '3900' } } } };
+    const raw = JSON.stringify(ev), ts = Math.floor(Date.now() / 1000);
+    const h1 = createHmac('sha256', process.env.PADDLE_WEBHOOK_SECRET).update(`${ts}:${raw}`).digest('hex');
+    assert.equal((await paddleFn(req('/api/paddle/webhook', 'POST', { 'paddle-signature': `ts=${ts};h1=${'0'.repeat(64)}` }, raw), { params: { action: 'webhook' } })).status, 400);
+    assert.equal((await paddleFn(req('/api/paddle/webhook', 'POST', { 'paddle-signature': `ts=${ts};h1=${h1}` }, raw), { params: { action: 'webhook' } })).status, 200);
+    return paddleFn(req(`/api/paddle/delivery?txn=${id}`), { params: { action: 'delivery' } });
+  };
+  // Prezzo non ancora registrato (sync-paddle mai eseguito): nessuna consegna, transazione da verificare.
+  assert.equal((await send('txn_01senzaprezzo', [{ price: { id: 'pri_altro' } }])).status, 202);
+  assert.equal(JSON.parse(STORES.transactions.get('paddle:txn_01senzaprezzo')).status, 'da_verificare');
+  await globalThis.__SF365_TEST_STORE__('provider-ids').setJSON(sku, { paddle_env: 'sandbox', paddle_price_id: 'pri_giusto', paddle_price: '39.00' });
+  // Sku dichiarato dal browser ma prezzo pagato diverso: nessuna consegna.
+  assert.equal((await send('txn_01prezzodiverso', [{ price: { id: 'pri_altro' } }])).status, 202);
+  assert.equal(JSON.parse(STORES.transactions.get('paddle:txn_01prezzodiverso')).delivery_token, undefined);
+  // Prezzo registrato: consegna emessa.
+  const d = await send('txn_01abcdefghij', [{ price: { id: 'pri_giusto' } }]);
   assert.equal(d.status, 200);
+  assert.match((await d.json()).license, /^SF365-/);
+});
+
+test('consegna di un file: il rimborso blocca lo scaricamento anche senza licenza', async () => {
+  const { fulfil, recordTransaction } = await import('../lib/sf365/core.mjs');
+  const product = PRODUCTS.find((p) => p.delivery.kind === 'download');
+  await recordTransaction({ provider: 'paypal', id: 'ORDFILE1', sku: product.sku, status: 'completato', capture_id: 'CAPFILE1' });
+  const { token, license } = await fulfil({ provider: 'paypal', id: 'ORDFILE1', product });
+  assert.equal(license, null);
+  await globalThis.__SF365_TEST_STORE__('files').set(product.delivery.file, new TextEncoder().encode('zip').buffer);
+  assert.equal((await deliveryFn(req(`/d/${token}`), { params: { token } })).status, 200);
+  await recordTransaction({ provider: 'paypal', id: 'ORDFILE1', status: 'rimborsato' });
+  const blocked = await deliveryFn(req(`/d/${token}`), { params: { token } });
+  assert.equal(blocked.status, 403);
+  assert.equal((await blocked.json()).error, 'pagamento_rimborsato');
 });
 
 test('amministrazione: token obbligatorio, registro esportabile in CSV', async () => {

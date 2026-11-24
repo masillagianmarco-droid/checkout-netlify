@@ -17,8 +17,10 @@ async function webhook(req, context) {
       if (!p || !sellable(p, "paddle", context).ok) { await recordTransaction({ provider: "paddle", id: d.id, sku: sku || null, status: "da_verificare", events: [log] }); break; }
       const items = d.items || [];
       const ids = (await getJSON("provider-ids", p.sku)) || {};
-      if (ids.paddle_price_id && !items.some((i) => i.price && i.price.id === ids.paddle_price_id)) {
-        await recordTransaction({ provider: "paddle", id: d.id, sku: p.sku, status: "da_verificare", events: [{ ...log, detail: "prezzo_non_corrispondente" }] });
+      // Lo sku arriva da custom_data, che il browser può impostare: la consegna parte solo se la transazione
+      // contiene il prezzo Paddle registrato per quello sku (sync-paddle). Senza prezzo registrato non si consegna.
+      if (!ids.paddle_price_id || !items.some((i) => i.price && i.price.id === ids.paddle_price_id)) {
+        await recordTransaction({ provider: "paddle", id: d.id, sku: p.sku, status: "da_verificare", events: [{ ...log, detail: ids.paddle_price_id ? "prezzo_non_corrispondente" : "prezzo_non_registrato" }] });
         break;
       }
       const totals = (d.details && d.details.totals) || {};

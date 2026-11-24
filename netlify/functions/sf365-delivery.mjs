@@ -23,6 +23,9 @@ export default async (req, context) => {
   // /d/:token — scaricamento
   if (!d.file) return json({ error: "nessun_file" }, 404);
   if (lic && lic.status !== "active") return json({ error: "licenza_non_attiva" }, 403);
+  // Un rimborso o uno storno blocca anche i prodotti senza licenza (solo file).
+  const src = d.source ? await getJSON("transactions", d.source) : null;
+  if (src && ["rimborsato", "stornato"].includes(src.status)) return json({ error: "pagamento_rimborsato" }, 403);
   if (d.downloads >= MAX_DOWNLOADS) return json({ error: "limite_scaricamenti" }, 429);
   const files = await store("files");
   const blob = await files.get(d.file, { type: "arrayBuffer" });
