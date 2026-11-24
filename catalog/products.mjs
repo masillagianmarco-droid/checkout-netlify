@@ -62,6 +62,55 @@ export const PRODUCTS = [
     status: "sandbox"
   },
   {
+    // SF365-0002 (Claude, 24/11/2026). Prezzi proposti, da approvare: sotto i servizi in abbonamento per dipendente,
+    // perché lo strumento funziona solo nel browser, senza account né sincronizzazione.
+    sku: "turnichiari-pro-12m",
+    project: "SF365-0002",
+    owner_ai: "Claude",
+    site: "https://turnichiari.netlify.app",
+    name: "TurniChiari — Licenza Pro 12 mesi",
+    description: "Pianificatore dei turni di lavoro: fino a 60 persone, piani fino a 4 settimane, esportazione CSV, calendari .ics per ogni persona, 20 piani salvati. Licenza personale valida 12 mesi.",
+    type: "one_time",
+    price: "29.00",
+    currency: "EUR",
+    tax_category: "standard",
+    delivery: { kind: "license", license_days: 365 },
+    return_url: "https://turnichiari.netlify.app/app",
+    status: "sandbox"
+  },
+  {
+    sku: "turnichiari-pro-mensile",
+    project: "SF365-0002",
+    owner_ai: "Claude",
+    site: "https://turnichiari.netlify.app",
+    name: "TurniChiari — Abbonamento Pro mensile",
+    description: "Le stesse funzioni della licenza Pro, con rinnovo mensile e disdetta in qualsiasi momento.",
+    type: "subscription",
+    interval: "month",
+    price: "3.90",
+    currency: "EUR",
+    tax_category: "standard",
+    delivery: { kind: "license" },
+    return_url: "https://turnichiari.netlify.app/app",
+    status: "sandbox"
+  },
+  {
+    sku: "turnichiari-pro-annuale",
+    project: "SF365-0002",
+    owner_ai: "Claude",
+    site: "https://turnichiari.netlify.app",
+    name: "TurniChiari — Abbonamento Pro annuale",
+    description: "Licenza Pro con rinnovo automatico annuale e disdetta in qualsiasi momento.",
+    type: "subscription",
+    interval: "year",
+    price: "29.00",
+    currency: "EUR",
+    tax_category: "standard",
+    delivery: { kind: "license" },
+    return_url: "https://turnichiari.netlify.app/app",
+    status: "sandbox"
+  },
+  {
     // Sito e prodotto realizzati da Grok Bot (registro GROKBOT, 24/11/2026). Prezzo 9,90 € indicato
     // da Grok Bot come approvato dal titolare. Il file va caricato nello store Blobs "files" con questa chiave.
     sku: "forfettario-in-ordine-2026",
