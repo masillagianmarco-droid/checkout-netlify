@@ -158,6 +158,9 @@ async function completeCheckout(orderId, nonce, session, token, payment, url) {
     }));
     if (session.offer.sf365) {
       const delivered = await safely(() => fulfil({ provider: 'paypal', id: orderId, product: findProduct(session.offerId), mode: payment.live ? 'live' : 'sandbox' }));
+      if (delivered && delivered.blocked) {
+        return page('Pagamento rimborsato o stornato', `<p>Per questo ordine PayPal risulta un rimborso o uno storno: nessuna licenza viene emessa. Riferimento: ${orderId}.</p>`, 409, payment.live);
+      }
       if (!delivered) {
         return page('Consegna da verificare', `<p>Il pagamento risulta completato. Conserva il riferimento PayPal ${orderId} e scrivi all’assistenza: la licenza verrà emessa manualmente.</p>`, 202, payment.live);
       }

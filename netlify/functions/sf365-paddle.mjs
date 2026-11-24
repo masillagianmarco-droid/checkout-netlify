@@ -34,14 +34,17 @@ async function webhook(req, context) {
       const sub = d.subscription_id ? await getJSON("transactions", `paddle-sub:${d.subscription_id}`) : null;
       if (sub && sub.license) {
         if (fresh) {
-          await recordTransaction({ provider: "paddle-sub", id: d.subscription_id, status: "attivo", last_payment_txn: d.id, payment_hold: null, events: [{ ...log, detail: "rinnovo:" + d.id }] });
+          // Il pagamento toglie il blocco per rimborso; lo stato «attivo» si applica solo se il rinnovo non è più
+          // vecchio dell'ultimo evento del ciclo di vita (per esempio una disdetta successiva).
+          const lifecycle = staleLifecycle(sub, ev.occurred_at) ? {} : { status: "attivo", ...(ev.occurred_at && { lifecycle_at: ev.occurred_at }) };
+          await recordTransaction({ provider: "paddle-sub", id: d.subscription_id, ...lifecycle, last_payment_txn: d.id, payment_hold: null, events: [{ ...log, detail: "rinnovo:" + d.id }] });
           await syncSubscriptionLicense("paddle-sub", d.subscription_id);
         }
         break;
       }
       const out = await fulfil({ provider: "paddle", id: d.id, product: p, expiresAt: p.type === "subscription" ? null : undefined, mode: sellable(p, "paddle", context).mode });
-      if (!out) break; // pagamento già rimborsato o stornato: nessuna consegna
-      if (d.subscription_id) await recordTransaction({ provider: "paddle-sub", id: d.subscription_id, sku: p.sku, status: "attivo", license: out.license, last_payment_txn: d.id, events: [log] });
+      if (!out || out.blocked) break; // pagamento già rimborsato o stornato: nessuna consegna
+      if (d.subscription_id) await recordTransaction({ provider: "paddle-sub", id: d.subscription_id, sku: p.sku, status: "attivo", license: out.license, last_payment_txn: d.id, ...(ev.occurred_at && { lifecycle_at: ev.occurred_at }), events: [log] });
       break;
     }
     case "subscription.canceled":

@@ -7,7 +7,8 @@ import { verifyWebhook } from '../../lib/sf365/paypal-webhook.mjs';
 // scritti prima dell'indice.
 async function byIndex(name, id, prefix, match) {
   const ix = id ? await getJSON('index', `${name}:${id}`) : null;
-  if (ix && ix.key) { const tx = await getJSON('transactions', ix.key); return tx ? [tx] : []; }
+  // L'indice si usa solo se punta davvero alla transazione cercata; altrimenti si torna alla scansione.
+  if (ix && ix.key) { const tx = await getJSON('transactions', ix.key); if (tx && match(tx)) return [tx]; }
   const out = [];
   for (const k of await listKeys('transactions', prefix)) {
     const tx = await getJSON('transactions', k);

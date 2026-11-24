@@ -526,3 +526,53 @@ test('rimborso arrivato prima della conferma: nessuna licenza; download bloccato
     assert.equal(r.status, 403); assert.equal((await r.json()).error, 'licenza_scaduta');
   }
 });
+
+// ---- Terza revisione indipendente (24/11/2026)
+async function paddleAt(event_type, data, occurred_at) {
+  process.env.PADDLE_WEBHOOK_SECRET = 'pdl_ntfset_test';
+  const raw = JSON.stringify({ event_id: 'evt_' + Math.random().toString(36).slice(2), event_type, ...(occurred_at && { occurred_at }), data }), ts = Math.floor(Date.now() / 1000);
+  const h1 = createHmac('sha256', process.env.PADDLE_WEBHOOK_SECRET).update(`${ts}:${raw}`).digest('hex');
+  const r = await paddleFn(req('/api/paddle/webhook', 'POST', { 'paddle-signature': `ts=${ts};h1=${h1}` }, raw), { params: { action: 'webhook' } });
+  assert.equal(r.status, 200);
+}
+test('Paddle: rinnovo consegnato in ritardo dopo la disdetta non riattiva; evento senza data dopo uno datato ignorato', async () => {
+  await ST('provider-ids').setJSON(sku, { paddle_env: 'sandbox', paddle_price_id: 'pri_giusto', paddle_price: '39.00' });
+  const sale = (id, at) => paddleAt('transaction.completed', { id, currency_code: 'EUR', custom_data: { sku }, items: [{ price: { id: 'pri_giusto' } }], details: { totals: { grand_total: '3900' } }, subscription_id: 'sub_01ritardo' }, at);
+  await sale('txn_01rit000001', '2026-11-24T10:00:00Z');
+  const lic = txOf('paddle-sub:sub_01ritardo').license;
+  await paddleAt('subscription.canceled', { id: 'sub_01ritardo' }, '2026-11-24T12:00:00Z');
+  await sale('txn_01rit000002', '2026-11-24T11:00:00Z');
+  assert.equal((await verifyLicence(lic)).reason, 'expired', 'rinnovo vecchio: la disdetta resta');
+  await paddleAt('subscription.activated', { id: 'sub_01ritardo' });
+  assert.equal((await verifyLicence(lic)).reason, 'expired', 'evento senza data dopo uno datato: ignorato');
+  await paddleAt('subscription.activated', { id: 'sub_01ritardo' }, '2026-11-24T13:00:00Z');
+  assert.equal((await verifyLicence(lic)).valid, true);
+});
+
+test('Paddle: abbonamento rimborsato prima della conferma: nessuna licenza e nessun errore', async () => {
+  await ST('provider-ids').setJSON(sku, { paddle_env: 'sandbox', paddle_price_id: 'pri_giusto', paddle_price: '39.00' });
+  await paddleEvent('adjustment.created', { id: 'adj_subprima', action: 'refund', status: 'approved', transaction_id: 'txn_01subprima01' });
+  await paddleSale('txn_01subprima01', { subscription_id: 'sub_01prima' });
+  assert.equal(STORES.transactions.has('paddle-sub:sub_01prima'), false);
+  assert.equal(txOf('paddle:txn_01subprima01').license, undefined);
+});
+
+test('indice PayPal che non corrisponde: si torna alla scansione; /api/delivery senza link a licenza scaduta', async () => {
+  const { fulfil, recordTransaction, setJSON } = await import('../lib/sf365/core.mjs');
+  const product = PRODUCTS.find((p) => p.delivery.kind === 'license');
+  await recordTransaction({ provider: 'paypal', id: 'ORDORFANO', sku: product.sku, status: 'completato', capture_id: 'CAPORFANO' });
+  const a = await fulfil({ provider: 'paypal', id: 'ORDORFANO', product });
+  await recordTransaction({ provider: 'paypal', id: 'ORDALTRO', sku: product.sku, status: 'completato', capture_id: 'CAPALTRO' });
+  await setJSON('index', 'capture:CAPORFANO', { key: 'paypal:ORDALTRO' }); // indice che punta a un'altra transazione esistente
+  await paypalEvent('PAYMENT.CAPTURE.REFUNDED', { id: 'R-ORF', links: [{ rel: 'up', href: 'https://api.paypal.com/v2/payments/captures/CAPORFANO' }] });
+  assert.equal((await verifyLicence(a.license)).reason, 'revoked');
+  assert.equal(txOf('paypal:ORDALTRO').status, 'completato', 'la transazione sbagliata non viene toccata');
+  const file = PRODUCTS.find((p) => p.delivery.file);
+  if (file) {
+    await ST('transactions').setJSON('paypal:ORDSCAD2', { provider: 'paypal', id: 'ORDSCAD2', sku: file.sku, status: 'completato' });
+    await setJSON('licenses', 'SF365-SCADUTA-DUE', { key: 'SF365-SCADUTA-DUE', sku: file.sku, status: 'active', expires_at: '2020-01-01T00:00:00Z' });
+    await setJSON('deliveries', 'tokenscadutodue0000000', { token: 'tokenscadutodue0000000', sku: file.sku, license: 'SF365-SCADUTA-DUE', source: 'paypal:ORDSCAD2', file: file.delivery.file, downloads: 0 });
+    const j = await (await deliveryFn(req('/api/delivery/tokenscadutodue0000000'), { params: { token: 'tokenscadutodue0000000' } })).json();
+    assert.equal(j.download, null);
+  }
+});

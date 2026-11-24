@@ -15,8 +15,9 @@ export default async (req, context) => {
   // Lo scaricamento richiede un pagamento registrato e non rimborsato né stornato, anche per i prodotti senza
   // licenza (solo file), e non vale per le consegne di prova quando le vendite reali sono attive.
   const src = d.source ? await getJSON("transactions", d.source) : null;
+  const expired = lic && lic.expires_at && new Date(lic.expires_at) < new Date();
   const blocked = !src ? "pagamento_non_registrato" : FINAL_STATUSES.includes(src.status) ? "pagamento_rimborsato"
-    : !usableInThisMode(d, context) ? "consegna_di_prova" : null;
+    : !usableInThisMode(d, context) ? "consegna_di_prova" : expired ? "licenza_scaduta" : null;
 
   if (url.pathname.startsWith("/api/delivery/")) {
     return json({
@@ -29,7 +30,6 @@ export default async (req, context) => {
   // /d/:token — scaricamento
   if (!d.file) return json({ error: "nessun_file" }, 404);
   if (lic && lic.status !== "active") return json({ error: "licenza_non_attiva" }, 403);
-  if (lic && lic.expires_at && new Date(lic.expires_at) < new Date()) return json({ error: "licenza_scaduta" }, 403);
   if (blocked) return json({ error: blocked }, 403);
   if (d.downloads >= MAX_DOWNLOADS) return json({ error: "limite_scaricamenti" }, 429);
   const files = await store("files");
