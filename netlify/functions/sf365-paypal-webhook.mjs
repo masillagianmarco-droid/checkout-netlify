@@ -1,16 +1,22 @@
 // Webhook PayPal verificati: registro centralizzato di tutte le vendite del checkout, revoca delle licenze SF365.
 import { findProduct } from '../../catalog/products.mjs';
-import { getJSON, json, listKeys, recordTransaction, setLicenseStatus, syncSubscriptionLicense } from '../../lib/sf365/core.mjs';
+import { getJSON, json, listKeys, recordTransaction, setJSON, setLicenseStatus, staleLifecycle, syncSubscriptionLicense } from '../../lib/sf365/core.mjs';
 import { verifyWebhook } from '../../lib/sf365/paypal-webhook.mjs';
 
-async function byCapture(captureId) {
+// Ricerca tramite indice (scritto alla cattura e al pagamento); lettura completa del registro solo per i record
+// scritti prima dell'indice.
+async function byIndex(name, id, prefix, match) {
+  const ix = id ? await getJSON('index', `${name}:${id}`) : null;
+  if (ix && ix.key) { const tx = await getJSON('transactions', ix.key); return tx ? [tx] : []; }
   const out = [];
-  for (const k of await listKeys('transactions', 'paypal:')) {
+  for (const k of await listKeys('transactions', prefix)) {
     const tx = await getJSON('transactions', k);
-    if (tx && tx.capture_id === captureId) out.push(tx);
+    if (tx && match(tx)) out.push(tx);
   }
   return out;
 }
+const byCapture = (captureId) => byIndex('capture', captureId, 'paypal:', (tx) => tx.capture_id === captureId);
+const bySale = (saleId) => byIndex('sale', saleId, 'paypal-sub:', (tx) => tx.last_payment?.id === saleId || (tx.paid_sales || []).includes(saleId));
 
 export default async (req, context) => {
   if (req.method !== 'POST') return json({ error: 'metodo' }, 405);
@@ -43,7 +49,9 @@ export default async (req, context) => {
     case 'BILLING.SUBSCRIPTION.EXPIRED': {
       const status = { 'BILLING.SUBSCRIPTION.ACTIVATED': 'attivo', 'BILLING.SUBSCRIPTION.RE-ACTIVATED': 'attivo', 'BILLING.SUBSCRIPTION.CANCELLED': 'disdetto', 'BILLING.SUBSCRIPTION.SUSPENDED': 'sospeso', 'BILLING.SUBSCRIPTION.EXPIRED': 'scaduto' }[ev.event_type];
       const tx = await getJSON('transactions', `paypal-sub:${res.id}`);
-      await recordTransaction({ provider: 'paypal-sub', id: res.id, status, plan_id: res.plan_id, ...(status === 'disdetto' && { paid_until: res.billing_info?.next_billing_time || now }), events: [log] });
+      // Un evento arrivato in ritardo (più vecchio dell'ultimo applicato) si registra ma non cambia lo stato.
+      if (staleLifecycle(tx, ev.create_time)) { await recordTransaction({ provider: 'paypal-sub', id: res.id, events: [{ ...log, detail: 'fuori_ordine' }] }); break; }
+      await recordTransaction({ provider: 'paypal-sub', id: res.id, status, plan_id: res.plan_id, ...(ev.create_time && { lifecycle_at: ev.create_time }), ...(status === 'disdetto' && { paid_until: res.billing_info?.next_billing_time || now }), events: [log] });
       // Il ciclo di vita non toglie un blocco per rimborso o storno (payment_hold): vedi syncSubscriptionLicense.
       if (tx?.license && findProduct(tx.sku)) await syncSubscriptionLicense('paypal-sub', res.id);
       break;
@@ -52,9 +60,8 @@ export default async (req, context) => {
     case 'PAYMENT.SALE.REVERSED': {
       // Rimborso o storno dell'ultimo pagamento di un abbonamento: blocco sull'abbonamento e licenza revocata.
       const saleId = res.sale_id || res.id;
-      for (const k of await listKeys('transactions', 'paypal-sub:')) {
-        const tx = await getJSON('transactions', k);
-        if (!tx || !saleId || tx.last_payment?.id !== saleId) continue;
+      for (const tx of saleId ? await bySale(saleId) : []) {
+        if (tx.last_payment?.id !== saleId) continue; // rimborso di un pagamento vecchio: il periodo in corso resta pagato
         await recordTransaction({ provider: 'paypal-sub', id: tx.id, payment_hold: saleId, ultimo_esito: ev.event_type.endsWith('REFUNDED') ? 'rimborsato' : 'stornato', events: [log] });
         if (tx.license) await setLicenseStatus(tx.license, 'revoked');
       }
@@ -73,6 +80,7 @@ export default async (req, context) => {
         paid_sales: [...paid, res.id].slice(-60), payment_hold: null,
         ...(legacyFinal && { status: 'attivo' }), events: [log],
       });
+      await setJSON('index', `sale:${res.id}`, { key: `paypal-sub:${res.billing_agreement_id}` });
       if (tx?.license && findProduct(tx.sku)) await syncSubscriptionLicense('paypal-sub', res.billing_agreement_id);
       break;
     }

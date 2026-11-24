@@ -454,3 +454,75 @@ test('riattivazione manuale di un abbonamento: toglie il blocco e segue il ciclo
   assert.equal(txOf(`paypal-sub:${id}`).status, 'attivo');
   assert.equal((await verifyLicence(license)).valid, true);
 });
+
+// ---- Rilievi della revisione parallela (Claude_QA 2026-11-24_REVISIONE_PR5_PR4) non ancora coperti
+test('eventi del ciclo di vita arrivati in ritardo non riattivano una licenza chiusa (Paddle e PayPal)', async () => {
+  await ST('provider-ids').setJSON(sku, { paddle_env: 'sandbox', paddle_price_id: 'pri_giusto', paddle_price: '39.00' });
+  await paddleSale('txn_01ordine0001', { subscription_id: 'sub_01ordine' });
+  const lic = txOf('paddle-sub:sub_01ordine').license;
+  process.env.PADDLE_WEBHOOK_SECRET = 'pdl_ntfset_test';
+  const send = async (event_type, data, occurred_at) => {
+    const raw = JSON.stringify({ event_id: 'evt_' + Math.random().toString(36).slice(2), event_type, occurred_at, data }), ts = Math.floor(Date.now() / 1000);
+    const h1 = createHmac('sha256', process.env.PADDLE_WEBHOOK_SECRET).update(`${ts}:${raw}`).digest('hex');
+    assert.equal((await paddleFn(req('/api/paddle/webhook', 'POST', { 'paddle-signature': `ts=${ts};h1=${h1}` }, raw), { params: { action: 'webhook' } })).status, 200);
+  };
+  await send('subscription.canceled', { id: 'sub_01ordine' }, '2026-11-24T12:00:00Z');
+  await send('subscription.activated', { id: 'sub_01ordine' }, '2026-11-24T11:00:00Z');
+  assert.equal((await verifyLicence(lic)).reason, 'expired', 'Paddle: activated in ritardo ignorato');
+  assert.ok(txOf('paddle-sub:sub_01ordine').events.some((e) => String(e.detail).startsWith('fuori_ordine')));
+
+  const { fulfil, recordTransaction } = await import('../lib/sf365/core.mjs');
+  const product = PRODUCTS.find((p) => p.type === 'subscription');
+  const id = 'I-FUORIORDINE1';
+  await recordTransaction({ provider: 'paypal-sub', id, sku: product.sku, status: 'attivo' });
+  const { license } = await fulfil({ provider: 'paypal-sub', id, product, expiresAt: null });
+  process.env.PAYPAL_WEBHOOK_ID = 'WH'; mockPayPal(); verify = 'SUCCESS';
+  const pp = (event_type, create_time) => webhook(req('/api/paypal/webhook', 'POST', paypalHeaders, JSON.stringify({ id: 'WH-' + Math.random().toString(36).slice(2), event_type, create_time, resource: { id, plan_id: 'P-1' } })), {});
+  await pp('BILLING.SUBSCRIPTION.EXPIRED', '2026-11-24T12:00:00Z');
+  await pp('BILLING.SUBSCRIPTION.ACTIVATED', '2026-11-24T11:00:00Z');
+  assert.equal((await verifyLicence(license)).reason, 'expired', 'PayPal: ACTIVATED in ritardo ignorato');
+  await pp('BILLING.SUBSCRIPTION.RE-ACTIVATED', '2026-11-24T13:00:00Z');
+  assert.equal((await verifyLicence(license)).valid, true, 'un evento più recente si applica');
+});
+
+test('rimborsi PayPal trovati tramite indice; record vecchi senza indice ancora trovati', async () => {
+  const { fulfil, recordTransaction } = await import('../lib/sf365/core.mjs');
+  const product = PRODUCTS.find((p) => p.delivery.kind === 'license');
+  await recordTransaction({ provider: 'paypal', id: 'ORDIDX1', sku: product.sku, status: 'completato', capture_id: 'CAPIDX1' });
+  const a = await fulfil({ provider: 'paypal', id: 'ORDIDX1', product });
+  assert.deepEqual(JSON.parse(STORES.index.get('capture:CAPIDX1')), { key: 'paypal:ORDIDX1' });
+  await ST('transactions').setJSON('paypal:ORDLEGACY', { provider: 'paypal', id: 'ORDLEGACY', sku: product.sku, status: 'completato', capture_id: 'CAPLEGACY' });
+  const b = await fulfil({ provider: 'paypal', id: 'ORDLEGACY', product });
+  for (const cap of ['CAPIDX1', 'CAPLEGACY']) {
+    await paypalEvent('PAYMENT.CAPTURE.REFUNDED', { id: 'R-' + cap, links: [{ rel: 'up', href: `https://api.paypal.com/v2/payments/captures/${cap}` }] });
+  }
+  assert.equal((await verifyLicence(a.license)).reason, 'revoked');
+  assert.equal((await verifyLicence(b.license)).reason, 'revoked');
+  // Abbonamento: indice sale:<id> scritto al pagamento
+  const sub = PRODUCTS.find((p) => p.type === 'subscription');
+  const id = 'I-INDICESALE01';
+  await recordTransaction({ provider: 'paypal-sub', id, sku: sub.sku, status: 'attivo' });
+  const c = await fulfil({ provider: 'paypal-sub', id, product: sub, expiresAt: null });
+  await paypalEvent('PAYMENT.SALE.COMPLETED', { id: 'SALE-IDX', billing_agreement_id: id });
+  assert.deepEqual(JSON.parse(STORES.index.get('sale:SALE-IDX')), { key: `paypal-sub:${id}` });
+  await paypalEvent('PAYMENT.SALE.REFUNDED', { id: 'REF-IDX', sale_id: 'SALE-IDX' });
+  assert.equal((await verifyLicence(c.license)).reason, 'revoked');
+});
+
+test('rimborso arrivato prima della conferma: nessuna licenza; download bloccato a licenza scaduta', async () => {
+  await ST('provider-ids').setJSON(sku, { paddle_env: 'sandbox', paddle_price_id: 'pri_giusto', paddle_price: '39.00' });
+  await paddleEvent('adjustment.created', { id: 'adj_prima', action: 'refund', status: 'approved', transaction_id: 'txn_01rimbprima01' });
+  await paddleSale('txn_01rimbprima01');
+  const tx = txOf('paddle:txn_01rimbprima01');
+  assert.equal(tx.status, 'rimborsato'); assert.equal(tx.license, undefined); assert.equal(tx.delivery_token, undefined);
+  const { setJSON } = await import('../lib/sf365/core.mjs');
+  const file = PRODUCTS.find((p) => p.delivery.file);
+  if (file) {
+    await ST('files').set(file.delivery.file, new TextEncoder().encode('zip').buffer);
+    await ST('transactions').setJSON('paypal:ORDSCAD', { provider: 'paypal', id: 'ORDSCAD', sku: file.sku, status: 'completato' });
+    await setJSON('licenses', 'SF365-SCADUTA-TEST', { key: 'SF365-SCADUTA-TEST', sku: file.sku, status: 'active', expires_at: '2020-01-01T00:00:00Z' });
+    await setJSON('deliveries', 'tokenscaduto0000000000', { token: 'tokenscaduto0000000000', sku: file.sku, license: 'SF365-SCADUTA-TEST', source: 'paypal:ORDSCAD', file: file.delivery.file, downloads: 0 });
+    const r = await deliveryFn(req('/d/tokenscaduto0000000000'), { params: { token: 'tokenscaduto0000000000' } });
+    assert.equal(r.status, 403); assert.equal((await r.json()).error, 'licenza_scaduta');
+  }
+});

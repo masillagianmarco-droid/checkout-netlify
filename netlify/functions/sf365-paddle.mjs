@@ -1,6 +1,6 @@
 // Paddle (alternativa): webhook firmati e recupero della consegna dopo il checkout.
 import { findProduct } from "../../catalog/products.mjs";
-import { json, env, recordTransaction, fulfil, getJSON, setLicenseStatus, sellable, syncSubscriptionLicense } from "../../lib/sf365/core.mjs";
+import { json, env, recordTransaction, fulfil, getJSON, setLicenseStatus, sellable, syncSubscriptionLicense, staleLifecycle } from "../../lib/sf365/core.mjs";
 import { verifySignature } from "../../lib/sf365/paddle.mjs";
 
 async function webhook(req, context) {
@@ -40,6 +40,7 @@ async function webhook(req, context) {
         break;
       }
       const out = await fulfil({ provider: "paddle", id: d.id, product: p, expiresAt: p.type === "subscription" ? null : undefined, mode: sellable(p, "paddle", context).mode });
+      if (!out) break; // pagamento già rimborsato o stornato: nessuna consegna
       if (d.subscription_id) await recordTransaction({ provider: "paddle-sub", id: d.subscription_id, sku: p.sku, status: "attivo", license: out.license, last_payment_txn: d.id, events: [log] });
       break;
     }
@@ -49,7 +50,10 @@ async function webhook(req, context) {
     case "subscription.activated":
     case "subscription.resumed": {
       const st = { canceled: "canceled", paused: "paused", past_due: "past_due", activated: "attivo", resumed: "attivo" }[ev.event_type.split(".")[1]];
-      await recordTransaction({ provider: "paddle-sub", id: d.id, status: st, events: [log] });
+      // Un evento arrivato in ritardo (più vecchio dell'ultimo applicato) si registra ma non cambia lo stato.
+      const cur = await getJSON("transactions", `paddle-sub:${d.id}`);
+      if (staleLifecycle(cur, ev.occurred_at)) { await recordTransaction({ provider: "paddle-sub", id: d.id, events: [{ ...log, detail: "fuori_ordine:" + ev.event_id }] }); break; }
+      await recordTransaction({ provider: "paddle-sub", id: d.id, status: st, ...(ev.occurred_at && { lifecycle_at: ev.occurred_at }), events: [log] });
       await syncSubscriptionLicense("paddle-sub", d.id);
       break;
     }
