@@ -369,3 +369,88 @@ test('punto 4 — storno annullato (chargeback_reverse) e riattivazione manuale 
   assert.ok(txOf('paddle:txn_01p4manuale01').events.some((e) => e.type === 'riattivazione_manuale'));
   assert.equal((await verifyLicence(lic2)).valid, true);
 });
+
+// ---- Rilievi della seconda revisione indipendente (24/11/2026) e mutazioni sopravvissute
+test('riconsegna di un pagamento vecchio dopo il rimborso del più recente: il blocco resta (Paddle e PayPal)', async () => {
+  await ST('provider-ids').setJSON(sku, { paddle_env: 'sandbox', paddle_price_id: 'pri_giusto', paddle_price: '39.00' });
+  await paddleSale('txn_01s1r1000001', { subscription_id: 'sub_01s1' });
+  const lic = txOf('paddle-sub:sub_01s1').license;
+  await paddleSale('txn_01s1r2000001', { subscription_id: 'sub_01s1' });
+  await paddleEvent('adjustment.created', { id: 'adj_s1', action: 'refund', status: 'approved', transaction_id: 'txn_01s1r2000001' });
+  assert.equal((await verifyLicence(lic)).reason, 'revoked');
+  await paddleSale('txn_01s1r1000001', { subscription_id: 'sub_01s1' });
+  assert.equal((await verifyLicence(lic)).reason, 'revoked', 'Paddle: R1 riconsegnato non toglie il blocco');
+  assert.equal(txOf('paddle-sub:sub_01s1').last_payment_txn, 'txn_01s1r2000001');
+
+  const { fulfil, recordTransaction } = await import('../lib/sf365/core.mjs');
+  const product = PRODUCTS.find((p) => p.type === 'subscription');
+  const id = 'I-S2RICONSEGNA1';
+  await recordTransaction({ provider: 'paypal-sub', id, sku: product.sku, status: 'attivo' });
+  const { license } = await fulfil({ provider: 'paypal-sub', id, product, expiresAt: null });
+  await paypalEvent('PAYMENT.SALE.COMPLETED', { id: 'SALE-1', billing_agreement_id: id });
+  await paypalEvent('PAYMENT.SALE.COMPLETED', { id: 'SALE-2', billing_agreement_id: id });
+  await paypalEvent('PAYMENT.SALE.REFUNDED', { id: 'REF-2', sale_id: 'SALE-2' });
+  await paypalEvent('PAYMENT.SALE.COMPLETED', { id: 'SALE-1', billing_agreement_id: id });
+  assert.equal((await verifyLicence(license)).reason, 'revoked', 'PayPal: SALE-1 riconsegnata non toglie il blocco');
+  assert.equal(txOf(`paypal-sub:${id}`).last_payment.id, 'SALE-2');
+});
+
+test('rimborso, poi storno, poi storno annullato: l’acquisto resta rimborsato', async () => {
+  await ST('provider-ids').setJSON(sku, { paddle_env: 'sandbox', paddle_price_id: 'pri_giusto', paddle_price: '39.00' });
+  await paddleSale('txn_01s4rimb00001');
+  const lic = txOf('paddle:txn_01s4rimb00001').license;
+  await paddleEvent('adjustment.created', { id: 'adj_s4a', action: 'refund', status: 'approved', transaction_id: 'txn_01s4rimb00001' });
+  await paddleEvent('adjustment.created', { id: 'adj_s4b', action: 'chargeback', status: 'approved', transaction_id: 'txn_01s4rimb00001' });
+  await paddleEvent('adjustment.created', { id: 'adj_s4c', action: 'chargeback_reverse', status: 'approved', transaction_id: 'txn_01s4rimb00001' });
+  assert.equal(txOf('paddle:txn_01s4rimb00001').status, 'rimborsato');
+  assert.equal((await verifyLicence(lic)).reason, 'revoked');
+});
+
+test('abbonamenti: past_due non revoca; lo storno annullato toglie solo il proprio blocco', async () => {
+  await ST('provider-ids').setJSON(sku, { paddle_env: 'sandbox', paddle_price_id: 'pri_giusto', paddle_price: '39.00' });
+  await paddleSale('txn_01m10a00001', { subscription_id: 'sub_01m10' });
+  const lic = txOf('paddle-sub:sub_01m10').license;
+  await paddleEvent('subscription.past_due', { id: 'sub_01m10' });
+  assert.equal((await verifyLicence(lic)).valid, true, 'past_due: periodo di tolleranza');
+  await paddleSale('txn_01m10b00001', { subscription_id: 'sub_01m10' });
+  await paddleEvent('adjustment.created', { id: 'adj_m12a', action: 'refund', status: 'approved', transaction_id: 'txn_01m10b00001' });
+  await paddleEvent('adjustment.created', { id: 'adj_m12b', action: 'chargeback', status: 'approved', transaction_id: 'txn_01m10a00001' });
+  await paddleEvent('adjustment.created', { id: 'adj_m12c', action: 'chargeback_reverse', status: 'approved', transaction_id: 'txn_01m10a00001' });
+  assert.equal(txOf('paddle:txn_01m10a00001').status, 'completato');
+  assert.equal((await verifyLicence(lic)).reason, 'revoked', 'resta il blocco del rimborso di txn_01m10b');
+  await paddleEvent('adjustment.created', { id: 'adj_m12d', action: 'chargeback', status: 'approved', transaction_id: 'txn_01m10b00001' });
+  assert.equal(txOf('paddle:txn_01m10b00001').status, 'rimborsato');
+});
+
+test('riattivazione manuale di un abbonamento: toglie il blocco e segue il ciclo di vita; record legacy', async () => {
+  process.env.ADMIN_TOKEN = 'z'.repeat(32);
+  const auth = { authorization: 'Bearer ' + 'z'.repeat(32), 'content-type': 'application/json' };
+  const call = (body) => adminFn(req('/api/admin/reactivate', 'POST', auth, body), { params: { action: 'reactivate' } });
+  assert.equal((await call('{non json')).status, 400);
+  // Paddle: blocco tolto a mano
+  await ST('provider-ids').setJSON(sku, { paddle_env: 'sandbox', paddle_price_id: 'pri_giusto', paddle_price: '39.00' });
+  await paddleSale('txn_01m11a00001', { subscription_id: 'sub_01m11' });
+  const lic = txOf('paddle-sub:sub_01m11').license;
+  await paddleEvent('adjustment.created', { id: 'adj_m11', action: 'refund', status: 'approved', transaction_id: 'txn_01m11a00001' });
+  assert.equal((await call(JSON.stringify({ key: lic, motivo: '   ' }))).status, 400, 'motivo di soli spazi');
+  assert.equal((await call(JSON.stringify({ key: lic, motivo: 'rimborso annullato' }))).status, 200);
+  assert.equal(txOf('paddle-sub:sub_01m11').payment_hold, null);
+  assert.equal((await verifyLicence(lic)).valid, true);
+  await paddleEvent('subscription.canceled', { id: 'sub_01m11' });
+  assert.equal((await call(JSON.stringify({ key: lic, motivo: 'prova' }))).status, 200);
+  assert.equal((await verifyLicence(lic)).reason, 'expired', 'un abbonamento chiuso non torna attivo a mano');
+  // PayPal: record legacy con status finale, poi pagamento successivo
+  const { fulfil, recordTransaction } = await import('../lib/sf365/core.mjs');
+  const product = PRODUCTS.find((p) => p.type === 'subscription');
+  const id = 'I-LEGACY000001';
+  await recordTransaction({ provider: 'paypal-sub', id, sku: product.sku, status: 'attivo' });
+  const { license } = await fulfil({ provider: 'paypal-sub', id, product, expiresAt: null });
+  await recordTransaction({ provider: 'paypal-sub', id, status: 'rimborsato', last_payment: { id: 'OLD' } });
+  await paypalEvent('PAYMENT.SALE.COMPLETED', { id: 'SALE-NUOVA', billing_agreement_id: id });
+  assert.equal(txOf(`paypal-sub:${id}`).status, 'attivo');
+  assert.equal((await verifyLicence(license)).valid, true, 'il cliente pagante non resta bloccato');
+  await recordTransaction({ provider: 'paypal-sub', id, status: 'stornato' });
+  assert.equal((await call(JSON.stringify({ key: license, motivo: 'contestazione vinta' }))).status, 200);
+  assert.equal(txOf(`paypal-sub:${id}`).status, 'attivo');
+  assert.equal((await verifyLicence(license)).valid, true);
+});

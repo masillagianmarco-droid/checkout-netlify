@@ -1,6 +1,6 @@
 // Paddle (alternativa): webhook firmati e recupero della consegna dopo il checkout.
 import { findProduct } from "../../catalog/products.mjs";
-import { json, env, recordTransaction, fulfil, getJSON, setLicenseStatus, sellable, syncSubscriptionLicense, FINAL_STATUSES } from "../../lib/sf365/core.mjs";
+import { json, env, recordTransaction, fulfil, getJSON, setLicenseStatus, sellable, syncSubscriptionLicense } from "../../lib/sf365/core.mjs";
 import { verifySignature } from "../../lib/sf365/paddle.mjs";
 
 async function webhook(req, context) {
@@ -23,14 +23,16 @@ async function webhook(req, context) {
         await recordTransaction({ provider: "paddle", id: d.id, sku: p.sku, status: "da_verificare", events: [{ ...log, detail: ids.paddle_price_id ? "prezzo_non_corrispondente" : "prezzo_non_registrato" }] });
         break;
       }
+      // Prima di registrare: questo pagamento è nuovo? Un evento già ricevuto e riconsegnato non deve contare
+      // come pagamento successivo (non toglie blocchi, non aggiorna l'ultimo pagamento).
+      const before = await getJSON("transactions", `paddle:${d.id}`);
+      const fresh = !before || before.status === "da_verificare";
       const totals = (d.details && d.details.totals) || {};
       await recordTransaction({ provider: "paddle", id: d.id, sku: p.sku, project: p.project, status: "completato", amount: totals.grand_total || null, currency: d.currency_code, subscription_id: d.subscription_id || null, mode: sellable(p, "paddle", context).mode, events: [log] });
       // Rinnovo di un abbonamento che ha già la sua licenza: nessuna licenza nuova. Un pagamento nuovo e riuscito
       // toglie l'eventuale blocco lasciato dal rimborso o dallo storno del pagamento precedente.
       const sub = d.subscription_id ? await getJSON("transactions", `paddle-sub:${d.subscription_id}`) : null;
       if (sub && sub.license) {
-        const cur = await getJSON("transactions", `paddle:${d.id}`);
-        const fresh = cur && !FINAL_STATUSES.includes(cur.status);
         if (fresh) {
           await recordTransaction({ provider: "paddle-sub", id: d.subscription_id, status: "attivo", last_payment_txn: d.id, payment_hold: null, events: [{ ...log, detail: "rinnovo:" + d.id }] });
           await syncSubscriptionLicense("paddle-sub", d.subscription_id);
@@ -60,7 +62,9 @@ async function webhook(req, context) {
       const reverse = d.action === "chargeback_reverse" && d.status !== "rejected";
       if (refund || chargeback) {
         // Rimborso approvato oppure storno non respinto: consegna chiusa; licenza revocata o abbonamento bloccato.
-        await recordTransaction({ provider: "paddle", id: d.transaction_id, status: refund ? "rimborsato" : "stornato", events: [log] });
+        // Un acquisto già rimborsato resta «rimborsato» anche se poi arriva uno storno: così l'annullamento
+        // dello storno non lo riapre.
+        await recordTransaction({ provider: "paddle", id: d.transaction_id, status: refund || (tx && tx.status === "rimborsato") ? "rimborsato" : "stornato", events: [log] });
         const sub = tx && tx.subscription_id ? await getJSON("transactions", `paddle-sub:${tx.subscription_id}`) : null;
         if (sub && sub.license) {
           // Blocca l'abbonamento solo se è stato rimborsato il pagamento che copre il periodo in corso.

@@ -63,9 +63,16 @@ export default async (req, context) => {
     case 'PAYMENT.SALE.COMPLETED': {
       if (!res.billing_agreement_id) break;
       const tx = await getJSON('transactions', `paypal-sub:${res.billing_agreement_id}`);
-      // Un pagamento successivo riuscito toglie il blocco lasciato dal rimborso del pagamento precedente.
-      const clears = tx?.payment_hold && tx.payment_hold !== res.id;
-      await recordTransaction({ provider: 'paypal-sub', id: res.billing_agreement_id, last_payment: { id: res.id, amount: res.amount }, ...(clears && { payment_hold: null }), events: [log] });
+      const paid = tx?.paid_sales || [];
+      // Solo un pagamento mai visto prima conta come «successivo»: una riconsegna di un evento vecchio non
+      // toglie il blocco lasciato da un rimborso e non diventa l'ultimo pagamento.
+      if (paid.includes(res.id)) { await recordTransaction({ provider: 'paypal-sub', id: res.billing_agreement_id, events: [{ ...log, detail: 'riconsegna:' + res.id }] }); break; }
+      const legacyFinal = ['rimborsato', 'stornato'].includes(tx?.status);
+      await recordTransaction({
+        provider: 'paypal-sub', id: res.billing_agreement_id, last_payment: { id: res.id, amount: res.amount },
+        paid_sales: [...paid, res.id].slice(-60), payment_hold: null,
+        ...(legacyFinal && { status: 'attivo' }), events: [log],
+      });
       if (tx?.license && findProduct(tx.sku)) await syncSubscriptionLicense('paypal-sub', res.billing_agreement_id);
       break;
     }
