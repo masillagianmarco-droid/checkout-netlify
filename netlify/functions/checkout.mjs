@@ -1,10 +1,12 @@
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 
+import { canDeliver, digitalDownload, digitalOffers, hasDigitalAsset, uploadDigitalAsset } from '../../lib/download-digitali.mjs';
 import { page, paymentSettings, paypalAccessToken } from '../../lib/paypal.mjs';
 import { readConfirmedOrder } from '../../lib/ordine-confermato.mjs';
 import { reserveOrder } from '../../lib/registro-ordini.mjs';
 
 const offers = new Map([
+  ...digitalOffers,
   ['ospitabene-kit-annuncio', {
     name: 'OspitaBene · Kit Annuncio',
     price: '49.00',
@@ -125,7 +127,7 @@ async function startCheckout(url, offerId, offer, token, payment, confirmedOrder
   });
 }
 
-async function completeCheckout(orderId, nonce, session, token, payment) {
+async function completeCheckout(orderId, nonce, session, token, payment, url) {
   let { ok, result } = await paypalOrder(payment.api, `/${orderId}/capture`, token, {
     body: {}, requestId: `cap-${nonce}`,
   });
@@ -142,6 +144,15 @@ async function completeCheckout(orderId, nonce, session, token, payment) {
     return page('Pagamento da verificare', '<p>La risposta di PayPal richiede un controllo.</p>', 502, payment.live);
   }
   if (result.status === 'COMPLETED' && capture.status === 'COMPLETED') {
+    if (digitalOffers.has(session.offerId)) {
+      if (!canDeliver(result, orderId, session.offerId, session.offer)) {
+        return page('Download da verificare', '<p>Contatta il venditore con il riferimento PayPal.</p>', 409, payment.live);
+      }
+      const download = new URL('/checkout/download', url);
+      download.searchParams.set('sessione', nonce);
+      download.searchParams.set('token', orderId);
+      return page('Scarica il tuo prodotto', `<p>PayPal ha verificato l’esito del pagamento.</p><p><a href="${download.pathname}?${download.searchParams.toString().replaceAll('&', '&amp;')}">Scarica ${session.offer.filename}</a></p>`, 200, payment.live);
+    }
     return payment.live
       ? page('Pagamento completato', '<p>PayPal ha confermato il pagamento per il tuo ordine.</p>', 200, true)
       : page('Pagamento di prova completato', '<p>PayPal Sandbox ha confermato l’importo previsto.</p>');
@@ -151,13 +162,21 @@ async function completeCheckout(orderId, nonce, session, token, payment) {
 
 export default async function checkout(request, context) {
   const url = new URL(request.url);
-  const isReturn = url.pathname === '/checkout/ritorno';
+  const isDownload = url.pathname === '/checkout/download';
+  const isReturn = url.pathname === '/checkout/ritorno' || isDownload;
   const isCancelled = url.pathname === '/checkout/annullato';
   const payment = paymentSettings(context);
   const nonce = url.searchParams.get('sessione');
   const orderId = url.searchParams.get('token');
   const offerId = url.searchParams.get('offerta');
   const offer = offers.get(offerId);
+  if (url.pathname === '/checkout/carica-prodotto') {
+    try {
+      return await uploadDigitalAsset(request, payment, offerId, url.searchParams.get('ambiente'));
+    } catch {
+      return Response.json({ error: 'Salvataggio non riuscito' }, { status: 502, headers: { 'Cache-Control': 'no-store' } });
+    }
+  }
 
   if (request.method === 'GET' && isCancelled) {
     return page(payment.live ? 'Pagamento annullato' : 'Prova annullata',
@@ -178,6 +197,26 @@ export default async function checkout(request, context) {
     }
   }
 
+  const digitalId = session?.offerId ?? offerId;
+  const digital = digitalOffers.get(digitalId);
+  if (digital) {
+    try {
+      if (!await hasDigitalAsset(digitalId, payment.live)) {
+        return page('Prodotto in preparazione', '<p>Il file non è disponibile per l’acquisto.</p>', 503, payment.live);
+      }
+      if (isDownload) {
+        if (request.method !== 'GET') return new Response(null, { status: 405, headers: { Allow: 'GET' } });
+        const token = await paypalAccessToken(payment);
+        const { ok, result } = await paypalOrder(payment.api, `/${orderId}`, token);
+        return ok && canDeliver(result, orderId, digitalId, digital)
+          ? await digitalDownload(digitalId, digital, payment.live)
+          : page('Download da verificare', '<p>Il pagamento deve essere verificato prima di scaricare il file.</p>', 409, payment.live);
+      }
+    } catch {
+      return page('Download da verificare', '<p>Contatta il venditore con il riferimento PayPal.</p>', 502, payment.live);
+    }
+  }
+  if (isDownload) return page('Download non disponibile', '', 404, payment.live);
   if (request.method === 'GET') {
     const displayedOffer = isReturn ? session.offer : offer;
     const buttonText = isReturn
@@ -185,6 +224,7 @@ export default async function checkout(request, context) {
       : (payment.live ? 'Paga con PayPal' : 'Prova il pagamento con PayPal');
     return page(displayedOffer.name, `<p>${displayedOffer.description}</p>
 <p class="price">${displayedOffer.price.replace('.', ',')} €</p>
+${digital ? `<p>${digital.help}</p><p>Il link di download è disponibile dopo la conferma del pagamento.</p>` : ''}
 <form method="post"><button type="submit">${buttonText}</button></form>`, 200, payment.live);
   }
   if (request.method !== 'POST') return new Response(null, { status: 405, headers: { Allow: 'GET, POST' } });
@@ -193,11 +233,11 @@ export default async function checkout(request, context) {
   try {
     const token = await paypalAccessToken(payment);
     return isReturn
-      ? await completeCheckout(orderId, nonce, session, token, payment)
+      ? await completeCheckout(orderId, nonce, session, token, payment, url)
       : await startCheckout(url, offerId, offer, token, payment, confirmedOrder);
   } catch {
     return page('Verifica PayPal necessaria', '<p>Controlla lo stato in PayPal o riprova dalla stessa pagina.</p>', 502, payment.live);
   }
 }
 
-export const config = { path: ['/checkout', '/checkout/ritorno', '/checkout/annullato'] };
+export const config = { path: ['/checkout', '/checkout/ritorno', '/checkout/annullato', '/checkout/download', '/checkout/carica-prodotto'] };
