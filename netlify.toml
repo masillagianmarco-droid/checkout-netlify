@@ -1,3 +1,16 @@
 [build]
   publish = "public"
   functions = "netlify/functions"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+
+# embed.js è caricato dai siti SITE FACTORY 365
+[[headers]]
+  for = "/embed.js"
+  [headers.values]
+    Access-Control-Allow-Origin = "*"
+    Cache-Control = "public, max-age=300"

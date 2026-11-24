@@ -1,6 +1,6 @@
 {
   "name": "checkout-netlify",
   "private": true,
-  "scripts": { "test": "node --test" },
+  "scripts": { "test": "node --test", "pagine": "node tools/build-pages.mjs" },
   "dependencies": { "@netlify/blobs": "11.1.9" }
 }

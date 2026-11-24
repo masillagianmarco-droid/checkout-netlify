@@ -1,7 +1,9 @@
 import { getStore } from '@netlify/blobs';
 import { randomUUID } from 'node:crypto';
 
-import { getVerifiedPlan, matchesSignature, paypalJson, planIdPattern, provisionPlan, signature, subscriptionIdPattern, subscriptions } from '../../lib/abbonamenti-paypal.mjs';
+import { getVerifiedPlan, matchesSignature, paypalJson, periodLabel, planIdPattern, provisionPlan, signature, subscriptionIdPattern, subscriptions } from '../../lib/abbonamenti-paypal.mjs';
+import { findProduct } from '../../catalog/products.mjs';
+import { fulfil, recordTransaction, safely, sellable } from '../../lib/sf365/core.mjs';
 import { readConfirmedOrder } from '../../lib/ordine-confermato.mjs';
 import { page, paymentSettings, paypalAccessToken } from '../../lib/paypal.mjs';
 import { reserveOrder } from '../../lib/registro-ordini.mjs';
@@ -26,7 +28,8 @@ async function configure(request, context, url, offerId, offer) {
   const mode = url.searchParams.get('ambiente');
   const expiration = request.headers.get('x-checkout-expiration');
   const now = Math.floor(Date.now() / 1000);
-  const authenticated = production.live && production.signingKey?.length >= 32
+  // I piani Sandbox si configurano anche prima dell'attivazione del live; i piani live restano legati alla produzione.
+  const authenticated = production.signingKey?.length >= 32 && (mode === 'sandbox' || production.live)
     && ['sandbox', 'live'].includes(mode) && /^\d{10}$/.test(expiration ?? '')
     && Number(expiration) >= now && Number(expiration) - now <= 300
     && matchesSignature(request.headers.get('authorization')?.replace(/^Bearer /, ''),
@@ -94,6 +97,17 @@ async function viewResult(request, url, payment, offerId, offer) {
   if (data.status !== 'ACTIVE' || paid?.currency_code !== offer.currency || Number(paid?.value) !== Number(offer.price)) {
     return page('Abbonamento da verificare', '<p>Il primo pagamento è in attesa di verifica. Controlla lo stato su PayPal prima di ripetere l’operazione.</p>', 202, payment.live);
   }
+  if (offer.sf365) {
+    await safely(() => recordTransaction({
+      provider: 'paypal-sub', id: session.id, sku: offer.sku, status: 'attivo', plan_id: session.planId,
+      amount: paid.value, currency: paid.currency_code, mode: payment.live ? 'live' : 'sandbox',
+      events: [{ at: new Date().toISOString(), type: 'abbonamento_attivato' }],
+    }));
+    const delivered = await safely(() => fulfil({ provider: 'paypal-sub', id: session.id, product: findProduct(offer.sku), expiresAt: null }));
+    const licence = delivered?.license ? `<p>La tua chiave di licenza:</p><p class="price">${delivered.license}</p><p><a href="/consegna.html?t=${delivered.token}">Apri la pagina di consegna</a>.</p>` : '<p>La licenza verrà emessa dall’assistenza: conserva il riferimento PayPal dell’abbonamento.</p>';
+    return page(payment.live ? 'Abbonamento attivo' : 'Abbonamento di prova attivo',
+      `<p>PayPal ha confermato il primo pagamento per ${offer.name}.</p>${licence}<p>Puoi disdire in qualsiasi momento dal tuo conto PayPal: la licenza resta valida fino alla fine del periodo pagato.</p>`, 200, payment.live);
+  }
   return page(payment.live ? 'Abbonamento attivo' : 'Abbonamento di prova attivo',
     `<p>PayPal ha confermato il primo pagamento per ${offer.name}.</p><p>Per contattare OspitaBene o chiedere la disdetta, scrivi a <a href="mailto:${offer.contact}">${offer.contact}</a>.</p>`, 200, payment.live);
 }
@@ -105,6 +119,9 @@ export default async function subscription(request, context) {
   const payment = paymentSettings(context);
   if (!offer) return page('Offerta non disponibile', '', 404, payment.live);
   if (url.pathname === setupPath) return configure(request, context, url, offerId, offer);
+  if (offer.sf365 && url.pathname === path && !sellable(findProduct(offer.sku), 'paypal', context).ok) {
+    return page('Offerta non disponibile', '<p>Questo abbonamento non è ancora in vendita.</p>', 403, payment.live);
+  }
   if (request.method === 'GET' && url.pathname === cancelPath) return page('Procedura annullata', '', 200, payment.live);
   if (!payment.clientId || !payment.secret || (payment.live && !(payment.signingKey?.length >= 32))) {
     return page('Abbonamento in preparazione', '', 503, payment.live);
@@ -119,8 +136,8 @@ export default async function subscription(request, context) {
     const saved = await setupStore(payment.live).get(offerId, { type: 'json' });
     if (!planIdPattern.test(saved?.id ?? '')) return page('Abbonamento in preparazione', '', 503, payment.live);
     if (request.method === 'GET') {
-      return page(offer.name, `<p>${offer.description}</p><p class="price">${offer.price.replace('.', ',')} € al mese</p>
-<p>Rinnovo automatico mensile. Puoi disdire in qualsiasi momento da PayPal o scrivendo a <a href="mailto:${offer.contact}">${offer.contact}</a>. Il servizio resta disponibile fino alla fine del periodo già pagato.</p>
+      return page(offer.name, `<p>${offer.description}</p><p class="price">${offer.price.replace('.', ',')} € ${periodLabel(offer)}</p>
+<p>Rinnovo automatico ${(offer.interval ?? 'MONTH') === 'YEAR' ? 'annuale' : 'mensile'}. Puoi disdire in qualsiasi momento da PayPal o scrivendo a <a href="mailto:${offer.contact}">${offer.contact}</a>. Il servizio resta disponibile fino alla fine del periodo già pagato.</p>
 <p><a href="${offer.site}">Informazioni sul servizio</a> · <a href="${offer.privacy}">Informativa privacy</a></p>
 <form method="post"><button type="submit">${payment.live ? 'Continua su PayPal per abbonarti' : 'Prova l’abbonamento con PayPal'}</button></form>`, 200, payment.live);
     }

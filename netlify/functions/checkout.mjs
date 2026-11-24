@@ -4,9 +4,16 @@ import { canDeliver, digitalDownload, digitalOffers, hasDigitalAsset, uploadDigi
 import { page, paymentSettings, paypalAccessToken } from '../../lib/paypal.mjs';
 import { readConfirmedOrder } from '../../lib/ordine-confermato.mjs';
 import { reserveOrder } from '../../lib/registro-ordini.mjs';
+import { PRODUCTS, findProduct } from '../../catalog/products.mjs';
+import { fulfil, recordTransaction, safely, sellable } from '../../lib/sf365/core.mjs';
+
+// Prodotti SITE FACTORY 365 con pagamento unico: stessi controlli del checkout esistente, più licenza e registro.
+const sf365Offers = PRODUCTS.filter(p => p.type === 'one_time' && p.status !== 'draft')
+  .map(p => [p.sku, { name: p.name, price: p.price, currency: p.currency, description: p.description, sf365: true }]);
 
 const offers = new Map([
   ...digitalOffers,
+  ...sf365Offers,
   ['ospitabene-kit-annuncio', {
     name: 'OspitaBene · Kit Annuncio',
     price: '49.00',
@@ -144,6 +151,19 @@ async function completeCheckout(orderId, nonce, session, token, payment, url) {
     return page('Pagamento da verificare', '<p>La risposta di PayPal richiede un controllo.</p>', 502, payment.live);
   }
   if (result.status === 'COMPLETED' && capture.status === 'COMPLETED') {
+    await safely(() => recordTransaction({
+      provider: 'paypal', id: orderId, sku: session.offerId, status: 'completato', capture_id: capture.id,
+      amount: capture.amount.value, currency: capture.amount.currency_code, mode: payment.live ? 'live' : 'sandbox',
+      events: [{ at: new Date().toISOString(), type: 'pagamento_catturato' }],
+    }));
+    if (session.offer.sf365) {
+      const delivered = await safely(() => fulfil({ provider: 'paypal', id: orderId, product: findProduct(session.offerId) }));
+      if (!delivered) {
+        return page('Consegna da verificare', `<p>Il pagamento risulta completato. Conserva il riferimento PayPal ${orderId} e scrivi all’assistenza: la licenza verrà emessa manualmente.</p>`, 202, payment.live);
+      }
+      const licence = delivered.license ? `<p>La tua chiave di licenza:</p><p class="price">${delivered.license}</p>` : '';
+      return page('Acquisto completato', `${licence}<p><a href="/consegna.html?t=${delivered.token}">Apri la pagina di consegna</a> per copiarla o scaricare i file.</p>`, 200, payment.live);
+    }
     if (digitalOffers.has(session.offerId)) {
       if (!canDeliver(result, orderId, session.offerId, session.offer)) {
         return page('Download da verificare', '<p>Contatta il venditore con il riferimento PayPal.</p>', 409, payment.live);
@@ -183,6 +203,9 @@ export default async function checkout(request, context) {
       offer && !payment.live ? `<p><a href="/checkout?offerta=${offerId}">Torna all’offerta</a></p>` : '', 200, payment.live);
   }
   if (!isReturn && !offer) return page('Offerta non disponibile', '<p>Apri il link dal sito che propone l’offerta.</p>', 404, payment.live);
+  if (!isReturn && offer?.sf365 && !sellable(findProduct(offerId), 'paypal', context).ok) {
+    return page('Offerta non disponibile', '<p>Questo prodotto non è ancora in vendita.</p>', 403, payment.live);
+  }
   if (!payment.clientId || !payment.secret || (payment.live && (payment.signingKey?.length ?? 0) < 32)) {
     return page('Checkout in preparazione', '<p>Il checkout non è ancora configurato.</p>', 503, payment.live);
   }
