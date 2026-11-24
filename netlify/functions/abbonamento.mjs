@@ -156,4 +156,4 @@ export default async function subscription(request, context) {
   }
 }
 
-export const config = { path: [path, returnPath, cancelPath, setupPath] };
+export const config = { path: ['/abbonamento', '/abbonamento/ritorno', '/abbonamento/annullato', '/abbonamento/configura'] };
