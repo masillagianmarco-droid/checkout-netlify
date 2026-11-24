@@ -20,6 +20,8 @@ const bash = (command, cwd = repo) => hook({ tool_name: 'Bash', tool_input: { co
 
 const BLOCCATI = [
   'git push origin main', 'git push origin HEAD:main', 'git push origin HEAD:refs/heads/main',
+  'git push origin refs/heads/main', "git push origin 'main'", 'git push origin "HEAD:main"',
+  "bash -c 'git push origin main'", 'sh -c "gh pr merge 4"', "eval 'git push --force origin x'",
   `git -C ${repo} push origin main`, 'git -c push.negotiate=true push origin main',
   'git push --force origin x', 'git push -f origin x', 'git push -uf origin x', 'git push origin +lavoro',
   'git push --force-with-lease origin x', 'git push', 'git push -u origin HEAD',
@@ -103,4 +105,18 @@ test('controlli di sicurezza: repository pulito superato, credenziali rifiutate'
     assert.equal(r.status, 1, name);
     assert.match(r.stdout, new RegExp(name.replace('.', '\\.')), name);
   }
+});
+
+test('controlli di sicurezza: prodotto «live» senza autorizzazione datata fa fallire la CI', () => {
+  const run = (cwd) => spawnSync(process.execPath, ['scripts/controlli-sicurezza.mjs'], { cwd, encoding: 'utf8' });
+  const conCatalogo = (extra) => {
+    const d = mkdtempSync(join(tmpdir(), 'catalogo-'));
+    mkdirSync(join(d, 'scripts')); mkdirSync(join(d, 'catalog'));
+    copyFileSync(join(ROOT, 'scripts/controlli-sicurezza.mjs'), join(d, 'scripts/controlli-sicurezza.mjs'));
+    writeFileSync(join(d, 'catalog/products.mjs'), `export const PRODUCTS = [{ sku: 'x', status: 'live'${extra} }];\n`);
+    return d;
+  };
+  assert.equal(run(conCatalogo('')).status, 1);
+  assert.equal(run(conCatalogo(", live_authorization: 'ok'")).status, 1);
+  assert.equal(run(conCatalogo(", live_authorization: '2026-12-01 autorizzato dal titolare per iscritto'")).status, 0);
 });

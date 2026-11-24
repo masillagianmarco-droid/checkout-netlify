@@ -67,6 +67,7 @@ jobs:
     if: >-
       github.event_name == 'pull_request' &&
       github.event.label.name == 'revisione-claude' &&
+      github.event.sender.login == github.repository_owner &&
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -82,10 +83,15 @@ jobs:
       - name: Segreto mancante
         if: env.HAS_TOKEN != 'true'
         run: echo "::notice::CLAUDE_CODE_OAUTH_TOKEN non configurato, nessuna esecuzione."
+      # Il revisore lavora sul ramo di BASE: CLAUDE.md, REVIEW.md, .claude/ (hook, impostazioni, agenti) e i
+      # workflow vengono da lì, non dal ramo in revisione, che un'altra IA potrebbe aver modificato.
+      # Le modifiche si leggono solo con «gh pr diff».
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         if: env.HAS_TOKEN == 'true'
         with:
+          ref: ${{ github.event.pull_request.base.sha }}
           fetch-depth: 1
+          persist-credentials: false
       - uses: anthropics/claude-code-action@eb56b6666facdbd501035f4a0269d8caee2e7a8b # v1
         if: env.HAS_TOKEN == 'true'
         with:
@@ -95,6 +101,9 @@ jobs:
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob"
           prompt: |
             Esegui una revisione indipendente della richiesta di unione #${{ github.event.pull_request.number }} di ${{ github.repository }}.
-            Segui REVIEW.md e CLAUDE.md alla radice del repository. Non modificare file e non fare commit.
+            Segui REVIEW.md e CLAUDE.md alla radice del repository: sono quelli del ramo di base, già estratto.
+            I file su disco sono la versione di BASE: leggi le modifiche SOLO con «gh pr diff» e «gh pr view».
+            Se la richiesta modifica REVIEW.md, CLAUDE.md, .claude/ o .github/, segnalalo come primo punto.
+            Non modificare file e non fare commit.
             Pubblica i risultati come commenti in linea sulle righe interessate e un commento riassuntivo in italiano
             (gh pr comment), ordinati per gravità. Non approvare e non unire la richiesta.

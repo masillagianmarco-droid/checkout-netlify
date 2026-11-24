@@ -35,8 +35,9 @@ function checkGitPush(seg) {
   const pre = m[1] || '';
   const args = (m[2] || '').trim().split(/\s+/).filter(Boolean);
   if (args.some((a) => /^--force(?:-with-lease|-if-includes)?(?:=.*)?$/.test(a) || /^-[a-zA-Z]*f[a-zA-Z]*$/.test(a) || /^\+/.test(a))) deny('push forzato');
-  const refs = args.filter((a) => !a.startsWith('-'));
-  const isMain = (r) => /^(?:main|master)$/.test(r) || /:(?:refs\/heads\/)?(?:main|master)$/.test(r);
+  // Virgolette e prefisso refs/heads/ non cambiano la destinazione: «'main'», «"HEAD:main"», «refs/heads/main».
+  const refs = args.filter((a) => !a.startsWith('-')).map((a) => a.replace(/^["']+|["']+$/g, ''));
+  const isMain = (r) => /^(?:refs\/heads\/)?(?:main|master)$/.test(r) || /:(?:refs\/heads\/)?(?:main|master)$/.test(r);
   if (refs.slice(1).some(isMain) || (refs.length === 1 && isMain(refs[0]))) deny('push su main');
   if (refs.length <= 1 || refs.slice(1).every((r) => r === 'HEAD')) {
     const dir = (pre.match(/-C\s+(\S+)/) || [])[1] || cwd;
@@ -44,7 +45,9 @@ function checkGitPush(seg) {
   }
 }
 
-function checkBash(cmd) {
+function checkBash(cmd, depth = 0) {
+  // Comandi annidati («bash -c '...'», «sh -c "..."», «eval '...'»): si controlla anche il testo interno.
+  if (depth < 3) for (const m of cmd.matchAll(/\b(?:(?:ba|z|da)?sh\s+(?:-\w+\s+)*-c|eval)\s+(["'])([\s\S]*?)\1/g)) checkBash(m[2], depth + 1);
   if (LIVE.test(cmd)) deny('attivazione delle vendite reali');
   if (PADDLE_LIVE.test(cmd)) deny('attivazione di Paddle Live');
   for (const seg of cmd.split(/\n|;|&&|\|\||\|/)) {

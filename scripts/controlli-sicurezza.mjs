@@ -71,9 +71,15 @@ const catalog = join(ROOT, 'catalog/products.mjs');
 if (existsSync(catalog)) {
   const { PRODUCTS } = await import(pathToFileURL(catalog).href); // un errore di importazione fa fallire la CI
   for (const p of PRODUCTS ?? []) {
+    // Un prodotto «live» fa fallire la CI se non riporta l'autorizzazione scritta e datata del titolare
+    // (campo live_authorization: "AAAA-MM-GG — testo dell'autorizzazione").
     if (p.status === 'live') {
-      warnings++;
-      console.log(`::warning file=catalog/products.mjs::Il prodotto ${p.sku} è marcato "live": serve l'autorizzazione scritta e datata del titolare.`);
+      if (typeof p.live_authorization === 'string' && /^\d{4}-\d{2}-\d{2}\b.{10,}/.test(p.live_authorization)) {
+        warnings++;
+        console.log(`::warning file=catalog/products.mjs::Il prodotto ${p.sku} è in vendita reale (autorizzazione: ${p.live_authorization.slice(0, 80)}).`);
+      } else {
+        problems.push(`Il prodotto ${p.sku} è marcato "live" senza live_authorization datata del titolare.`);
+      }
     }
   }
 }
