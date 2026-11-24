@@ -1,6 +1,6 @@
 /* SITE FACTORY 365 — collegamento dei siti al checkout centralizzato.
  * <script src="https://lively-croissant-4a8ae9.netlify.app/embed.js" defer></script>
- * <a data-sf365-sku="dpa-studio-pro-12m">Acquista</a>  ·  abbonamenti: <a data-sf365-sku="…" data-sf365-abbonamento>Abbonati</a>
+ * <a data-sf365-sku="avvicendo-pro-12m">Acquista</a>  ·  abbonamenti: <a data-sf365-sku="…" data-sf365-abbonamento>Abbonati</a>
  * SF365.verifyLicense(key, sku) -> Promise<{valid, expires_at, reason}>
  */
 (function () {
