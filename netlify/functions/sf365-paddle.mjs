@@ -1,6 +1,6 @@
 // Paddle (alternativa): webhook firmati e recupero della consegna dopo il checkout.
 import { findProduct } from "../../catalog/products.mjs";
-import { json, env, recordTransaction, fulfil, getJSON, setLicenseStatus, sellable } from "../../lib/sf365/core.mjs";
+import { json, env, recordTransaction, fulfil, getJSON, setLicenseStatus, sellable, syncSubscriptionLicense, FINAL_STATUSES } from "../../lib/sf365/core.mjs";
 import { verifySignature } from "../../lib/sf365/paddle.mjs";
 
 async function webhook(req, context) {
@@ -25,38 +25,57 @@ async function webhook(req, context) {
       }
       const totals = (d.details && d.details.totals) || {};
       await recordTransaction({ provider: "paddle", id: d.id, sku: p.sku, project: p.project, status: "completato", amount: totals.grand_total || null, currency: d.currency_code, subscription_id: d.subscription_id || null, mode: sellable(p, "paddle", context).mode, events: [log] });
-      // Rinnovo di un abbonamento che ha già la sua licenza: nessuna licenza nuova.
+      // Rinnovo di un abbonamento che ha già la sua licenza: nessuna licenza nuova. Un pagamento nuovo e riuscito
+      // toglie l'eventuale blocco lasciato dal rimborso o dallo storno del pagamento precedente.
       const sub = d.subscription_id ? await getJSON("transactions", `paddle-sub:${d.subscription_id}`) : null;
-      if (sub && sub.license) { await recordTransaction({ provider: "paddle-sub", id: d.subscription_id, status: "attivo", events: [{ ...log, detail: "rinnovo:" + d.id }] }); break; }
+      if (sub && sub.license) {
+        const cur = await getJSON("transactions", `paddle:${d.id}`);
+        const fresh = cur && !FINAL_STATUSES.includes(cur.status);
+        if (fresh) {
+          await recordTransaction({ provider: "paddle-sub", id: d.subscription_id, status: "attivo", last_payment_txn: d.id, payment_hold: null, events: [{ ...log, detail: "rinnovo:" + d.id }] });
+          await syncSubscriptionLicense("paddle-sub", d.subscription_id);
+        }
+        break;
+      }
       const out = await fulfil({ provider: "paddle", id: d.id, product: p, expiresAt: p.type === "subscription" ? null : undefined, mode: sellable(p, "paddle", context).mode });
-      if (d.subscription_id) await recordTransaction({ provider: "paddle-sub", id: d.subscription_id, sku: p.sku, status: "attivo", license: out.license, events: [log] });
+      if (d.subscription_id) await recordTransaction({ provider: "paddle-sub", id: d.subscription_id, sku: p.sku, status: "attivo", license: out.license, last_payment_txn: d.id, events: [log] });
       break;
     }
     case "subscription.canceled":
     case "subscription.paused":
-    case "subscription.past_due": {
-      const tx = await getJSON("transactions", `paddle-sub:${d.id}`);
-      const st = ev.event_type.split(".")[1];
-      await recordTransaction({ provider: "paddle-sub", id: d.id, status: st, events: [log] });
-      if (tx && tx.license && st !== "past_due") await setLicenseStatus(tx.license, st === "canceled" ? "expired" : "revoked");
-      break;
-    }
+    case "subscription.past_due":
     case "subscription.activated":
     case "subscription.resumed": {
-      const tx = await getJSON("transactions", `paddle-sub:${d.id}`);
-      await recordTransaction({ provider: "paddle-sub", id: d.id, status: "attivo", events: [log] });
-      if (tx && tx.license) await setLicenseStatus(tx.license, "active", null);
+      const st = { canceled: "canceled", paused: "paused", past_due: "past_due", activated: "attivo", resumed: "attivo" }[ev.event_type.split(".")[1]];
+      await recordTransaction({ provider: "paddle-sub", id: d.id, status: st, events: [log] });
+      await syncSubscriptionLicense("paddle-sub", d.id);
       break;
     }
     case "adjustment.created":
     case "adjustment.updated": {
-      // Rimborso approvato oppure storno (chargeback) non respinto: la consegna si chiude e la licenza si revoca.
+      if (!d.transaction_id) break;
+      const tx = await getJSON("transactions", `paddle:${d.transaction_id}`);
       const refund = d.action === "refund" && d.status === "approved";
       const chargeback = d.action === "chargeback" && d.status !== "rejected";
-      if ((refund || chargeback) && d.transaction_id) {
-        const tx = await getJSON("transactions", `paddle:${d.transaction_id}`);
+      const reverse = d.action === "chargeback_reverse" && d.status !== "rejected";
+      if (refund || chargeback) {
+        // Rimborso approvato oppure storno non respinto: consegna chiusa; licenza revocata o abbonamento bloccato.
         await recordTransaction({ provider: "paddle", id: d.transaction_id, status: refund ? "rimborsato" : "stornato", events: [log] });
-        if (tx && tx.license) await setLicenseStatus(tx.license, "revoked");
+        const sub = tx && tx.subscription_id ? await getJSON("transactions", `paddle-sub:${tx.subscription_id}`) : null;
+        if (sub && sub.license) {
+          // Blocca l'abbonamento solo se è stato rimborsato il pagamento che copre il periodo in corso.
+          const latest = !sub.last_payment_txn || sub.last_payment_txn === d.transaction_id;
+          await recordTransaction({ provider: "paddle-sub", id: tx.subscription_id, ...(latest && { payment_hold: d.transaction_id }), events: [{ ...log, detail: (refund ? "rimborso:" : "storno:") + d.transaction_id }] });
+          await syncSubscriptionLicense("paddle-sub", tx.subscription_id);
+        } else if (tx && tx.license) await setLicenseStatus(tx.license, "revoked");
+      } else if (reverse && tx && tx.status === "stornato") {
+        // Storno annullato a favore del venditore: il pagamento torna valido.
+        await recordTransaction({ provider: "paddle", id: d.transaction_id, status: "completato", events: [{ ...log, detail: "storno_annullato" }] }, { reopen: true });
+        const sub = tx.subscription_id ? await getJSON("transactions", `paddle-sub:${tx.subscription_id}`) : null;
+        if (sub && sub.license) {
+          if (sub.payment_hold === d.transaction_id) await recordTransaction({ provider: "paddle-sub", id: tx.subscription_id, payment_hold: null, events: [{ ...log, detail: "storno_annullato:" + d.transaction_id }] });
+          await syncSubscriptionLicense("paddle-sub", tx.subscription_id);
+        } else if (tx.license) await setLicenseStatus(tx.license, "active");
       }
       break;
     }

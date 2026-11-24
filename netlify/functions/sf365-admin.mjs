@@ -1,6 +1,6 @@
-// Amministrazione (solo con ADMIN_TOKEN): sincronizzazione cataloghi, registro, file, revoche.
+// Amministrazione (solo con ADMIN_TOKEN): sincronizzazione cataloghi, registro, file, revoche e riattivazioni.
 import { PRODUCTS, findProduct, validateCatalog } from "../../catalog/products.mjs";
-import { json, isAdmin, getJSON, setJSON, listKeys, store, setLicenseStatus, mode } from "../../lib/sf365/core.mjs";
+import { json, isAdmin, getJSON, setJSON, listKeys, store, setLicenseStatus, mode, recordTransaction, FINAL_STATUSES } from "../../lib/sf365/core.mjs";
 import * as PD from "../../lib/sf365/paddle.mjs";
 
 async function syncPaddle(context) {
@@ -52,6 +52,23 @@ export default async (req, context) => {
       const { key } = await req.json();
       const l = await setLicenseStatus(String(key || ""), "revoked");
       return l ? json({ ok: true, license: l }) : json({ error: "sconosciuta" }, 404);
+    }
+    if (a === "reactivate" && req.method === "POST") {
+      // Riattivazione manuale (per esempio dopo una contestazione chiusa a favore del venditore o un errore):
+      // riapre la transazione d'origine e toglie il blocco dell'abbonamento. Resta traccia nel registro.
+      const { key, motivo } = await req.json();
+      const l = await getJSON("licenses", String(key || ""));
+      if (!l) return json({ error: "sconosciuta" }, 404);
+      const why = String(motivo || "").slice(0, 200);
+      if (!why) return json({ error: "motivo_obbligatorio" }, 400);
+      const ev = { at: new Date().toISOString(), type: "riattivazione_manuale", detail: why };
+      const [provider, ...rest] = String(l.source || "").split(":"); const id = rest.join(":");
+      const tx = provider ? await getJSON("transactions", l.source) : null;
+      if (tx && FINAL_STATUSES.includes(tx.status)) await recordTransaction({ provider, id, status: "completato", events: [ev] }, { reopen: true });
+      const subKey = provider === "paddle" && tx && tx.subscription_id ? `paddle-sub:${tx.subscription_id}` : (provider === "paypal-sub" ? l.source : null);
+      if (subKey) { const [sp, ...sr] = subKey.split(":"); await recordTransaction({ provider: sp, id: sr.join(":"), payment_hold: null, events: [ev] }); }
+      const out = await setLicenseStatus(l.key, "active");
+      return json({ ok: true, license: out });
     }
     if (a === "upload" && req.method === "PUT") {
       const sku = new URL(req.url).searchParams.get("sku");

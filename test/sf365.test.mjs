@@ -290,3 +290,82 @@ test('catalogo pubblico con i collegamenti di acquisto', async () => {
   assert.ok(j.products.some((p) => p.buy === `/checkout?offerta=${sku}`));
   assert.ok(j.products.some((p) => p.buy === '/abbonamento?offerta=dpa-studio-pro-annuale'));
 });
+
+// ---- Punti 2, 3 e 4 rimasti aperti dopo la revisione indipendente (chiusi il 24/11/2026)
+const paypalHeaders = { 'paypal-auth-algo': 'a', 'paypal-cert-url': 'b', 'paypal-transmission-id': 'c', 'paypal-transmission-sig': 'd', 'paypal-transmission-time': 'e' };
+async function paypalEvent(event_type, resource) {
+  process.env.PAYPAL_WEBHOOK_ID = 'WH'; mockPayPal(); verify = 'SUCCESS';
+  const r = await webhook(req('/api/paypal/webhook', 'POST', paypalHeaders, JSON.stringify({ id: 'WH-' + Math.random().toString(36).slice(2), event_type, resource })), {});
+  assert.equal(r.status, 200);
+}
+
+test('punto 2 — PayPal: dopo un rimborso solo un pagamento nuovo riattiva; disdetta e riattivazione non riaprono', async () => {
+  const { fulfil, recordTransaction } = await import('../lib/sf365/core.mjs');
+  const product = PRODUCTS.find((p) => p.type === 'subscription');
+  const id = 'I-PUNTO2ABCDEF';
+  await recordTransaction({ provider: 'paypal-sub', id, sku: product.sku, status: 'attivo' });
+  const { license } = await fulfil({ provider: 'paypal-sub', id, product, expiresAt: null });
+  await paypalEvent('PAYMENT.SALE.COMPLETED', { id: 'SALE-A', billing_agreement_id: id, amount: { total: '5.00' } });
+  assert.equal((await verifyLicence(license)).valid, true);
+  await paypalEvent('PAYMENT.SALE.REFUNDED', { id: 'REF-A', sale_id: 'SALE-A' });
+  assert.equal((await verifyLicence(license)).reason, 'revoked');
+  await paypalEvent('BILLING.SUBSCRIPTION.RE-ACTIVATED', { id, plan_id: 'P-1' });
+  assert.equal((await verifyLicence(license)).reason, 'revoked', 'la riattivazione del ciclo di vita non toglie il blocco');
+  await paypalEvent('BILLING.SUBSCRIPTION.CANCELLED', { id, plan_id: 'P-1', billing_info: { next_billing_time: '2099-01-01T00:00:00Z' } });
+  assert.equal((await verifyLicence(license)).reason, 'revoked', 'la disdetta non riapre il periodo rimborsato');
+  await paypalEvent('PAYMENT.SALE.COMPLETED', { id: 'SALE-A', billing_agreement_id: id });
+  assert.equal((await verifyLicence(license)).reason, 'revoked', 'lo stesso pagamento ripetuto non conta');
+  await paypalEvent('BILLING.SUBSCRIPTION.ACTIVATED', { id, plan_id: 'P-1' });
+  await paypalEvent('PAYMENT.SALE.COMPLETED', { id: 'SALE-B', billing_agreement_id: id });
+  assert.equal((await verifyLicence(license)).valid, true, 'il pagamento successivo riuscito riattiva il cliente pagante');
+  await paypalEvent('BILLING.SUBSCRIPTION.CANCELLED', { id, plan_id: 'P-1', billing_info: { next_billing_time: '2099-01-01T00:00:00Z' } });
+  const v = await verifyLicence(license);
+  assert.equal(v.valid, true); assert.equal(v.expires_at, '2099-01-01T00:00:00Z', 'disdetto: vale fino alla fine del periodo pagato');
+});
+
+test('punto 3 — Paddle: rimborso o storno di un rinnovo bloccano l’abbonamento; il rinnovo pagato successivo lo sblocca', async () => {
+  await ST('provider-ids').setJSON(sku, { paddle_env: 'sandbox', paddle_price_id: 'pri_giusto', paddle_price: '39.00' });
+  await paddleSale('txn_01p3primo00001', { subscription_id: 'sub_01punto3' });
+  const lic = txOf('paddle-sub:sub_01punto3').license;
+  await paddleSale('txn_01p3rinnovo001', { subscription_id: 'sub_01punto3' });
+  await paddleEvent('adjustment.created', { id: 'adj_p3a', action: 'refund', status: 'approved', transaction_id: 'txn_01p3primo00001' });
+  assert.equal((await verifyLicence(lic)).valid, true, 'rimborso di un mese già superato: il periodo in corso resta pagato');
+  await paddleEvent('adjustment.created', { id: 'adj_p3b', action: 'chargeback', status: 'approved', transaction_id: 'txn_01p3rinnovo001' });
+  assert.equal((await verifyLicence(lic)).reason, 'revoked', 'storno del rinnovo in corso: licenza revocata');
+  await paddleEvent('subscription.resumed', { id: 'sub_01punto3' });
+  assert.equal((await verifyLicence(lic)).reason, 'revoked', 'la ripresa non toglie il blocco');
+  await paddleSale('txn_01p3rinnovo001', { subscription_id: 'sub_01punto3' });
+  assert.equal((await verifyLicence(lic)).reason, 'revoked', 'l’evento ripetuto del pagamento stornato non conta');
+  await paddleSale('txn_01p3rinnovo002', { subscription_id: 'sub_01punto3' });
+  assert.equal((await verifyLicence(lic)).valid, true, 'nuovo rinnovo pagato: licenza riattivata');
+  await paddleEvent('subscription.paused', { id: 'sub_01punto3' });
+  assert.equal((await verifyLicence(lic)).reason, 'revoked');
+  await paddleEvent('subscription.canceled', { id: 'sub_01punto3' });
+  assert.equal((await verifyLicence(lic)).reason, 'expired');
+});
+
+test('punto 4 — storno annullato (chargeback_reverse) e riattivazione manuale con motivo', async () => {
+  await ST('provider-ids').setJSON(sku, { paddle_env: 'sandbox', paddle_price_id: 'pri_giusto', paddle_price: '39.00' });
+  await paddleSale('txn_01p4singolo001');
+  const lic = txOf('paddle:txn_01p4singolo001').license;
+  await paddleEvent('adjustment.created', { id: 'adj_p4a', action: 'chargeback', status: 'approved', transaction_id: 'txn_01p4singolo001' });
+  assert.equal((await verifyLicence(lic)).reason, 'revoked');
+  await paddleEvent('adjustment.created', { id: 'adj_p4b', action: 'chargeback_reverse', status: 'approved', transaction_id: 'txn_01p4singolo001' });
+  assert.equal(txOf('paddle:txn_01p4singolo001').status, 'completato');
+  assert.equal((await verifyLicence(lic)).valid, true);
+  await paddleEvent('adjustment.created', { id: 'adj_p4c', action: 'chargeback_reverse', status: 'approved', transaction_id: 'txn_01p4singolo001' });
+  assert.equal(txOf('paddle:txn_01p4singolo001').status, 'completato', 'senza storno in corso non cambia nulla');
+  // Riattivazione manuale di un acquisto rimborsato per errore
+  await paddleSale('txn_01p4manuale01');
+  const lic2 = txOf('paddle:txn_01p4manuale01').license;
+  await paddleEvent('adjustment.created', { id: 'adj_p4d', action: 'refund', status: 'approved', transaction_id: 'txn_01p4manuale01' });
+  process.env.ADMIN_TOKEN = 'z'.repeat(32);
+  const auth = { authorization: 'Bearer ' + 'z'.repeat(32), 'content-type': 'application/json' };
+  assert.equal((await adminFn(req('/api/admin/reactivate', 'POST', { 'content-type': 'application/json' }, JSON.stringify({ key: lic2, motivo: 'x' })), { params: { action: 'reactivate' } })).status, 401);
+  assert.equal((await adminFn(req('/api/admin/reactivate', 'POST', auth, JSON.stringify({ key: lic2 })), { params: { action: 'reactivate' } })).status, 400, 'motivo obbligatorio');
+  const r = await adminFn(req('/api/admin/reactivate', 'POST', auth, JSON.stringify({ key: lic2, motivo: 'rimborso annullato dal titolare' })), { params: { action: 'reactivate' } });
+  assert.equal(r.status, 200);
+  assert.equal(txOf('paddle:txn_01p4manuale01').status, 'completato');
+  assert.ok(txOf('paddle:txn_01p4manuale01').events.some((e) => e.type === 'riattivazione_manuale'));
+  assert.equal((await verifyLicence(lic2)).valid, true);
+});

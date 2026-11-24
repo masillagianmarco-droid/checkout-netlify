@@ -1,6 +1,6 @@
 // Webhook PayPal verificati: registro centralizzato di tutte le vendite del checkout, revoca delle licenze SF365.
 import { findProduct } from '../../catalog/products.mjs';
-import { getJSON, json, listKeys, recordTransaction, setLicenseStatus } from '../../lib/sf365/core.mjs';
+import { getJSON, json, listKeys, recordTransaction, setLicenseStatus, syncSubscriptionLicense } from '../../lib/sf365/core.mjs';
 import { verifyWebhook } from '../../lib/sf365/paypal-webhook.mjs';
 
 async function byCapture(captureId) {
@@ -43,29 +43,32 @@ export default async (req, context) => {
     case 'BILLING.SUBSCRIPTION.EXPIRED': {
       const status = { 'BILLING.SUBSCRIPTION.ACTIVATED': 'attivo', 'BILLING.SUBSCRIPTION.RE-ACTIVATED': 'attivo', 'BILLING.SUBSCRIPTION.CANCELLED': 'disdetto', 'BILLING.SUBSCRIPTION.SUSPENDED': 'sospeso', 'BILLING.SUBSCRIPTION.EXPIRED': 'scaduto' }[ev.event_type];
       const tx = await getJSON('transactions', `paypal-sub:${res.id}`);
-      await recordTransaction({ provider: 'paypal-sub', id: res.id, status, plan_id: res.plan_id, events: [log] });
-      if (tx?.license && findProduct(tx.sku)) {
-        if (status === 'attivo') await setLicenseStatus(tx.license, 'active', null);
-        else if (status === 'disdetto') await setLicenseStatus(tx.license, 'active', res.billing_info?.next_billing_time || now);
-        else await setLicenseStatus(tx.license, status === 'scaduto' ? 'expired' : 'revoked');
-      }
+      await recordTransaction({ provider: 'paypal-sub', id: res.id, status, plan_id: res.plan_id, ...(status === 'disdetto' && { paid_until: res.billing_info?.next_billing_time || now }), events: [log] });
+      // Il ciclo di vita non toglie un blocco per rimborso o storno (payment_hold): vedi syncSubscriptionLicense.
+      if (tx?.license && findProduct(tx.sku)) await syncSubscriptionLicense('paypal-sub', res.id);
       break;
     }
     case 'PAYMENT.SALE.REFUNDED':
     case 'PAYMENT.SALE.REVERSED': {
-      // Rimborso o storno dell'ultimo pagamento di un abbonamento: la licenza si revoca.
+      // Rimborso o storno dell'ultimo pagamento di un abbonamento: blocco sull'abbonamento e licenza revocata.
       const saleId = res.sale_id || res.id;
       for (const k of await listKeys('transactions', 'paypal-sub:')) {
         const tx = await getJSON('transactions', k);
         if (!tx || !saleId || tx.last_payment?.id !== saleId) continue;
-        await recordTransaction({ provider: 'paypal-sub', id: tx.id, status: ev.event_type.endsWith('REFUNDED') ? 'rimborsato' : 'stornato', events: [log] });
-        await setLicenseStatus(tx.license, 'revoked');
+        await recordTransaction({ provider: 'paypal-sub', id: tx.id, payment_hold: saleId, ultimo_esito: ev.event_type.endsWith('REFUNDED') ? 'rimborsato' : 'stornato', events: [log] });
+        if (tx.license) await setLicenseStatus(tx.license, 'revoked');
       }
       break;
     }
-    case 'PAYMENT.SALE.COMPLETED':
-      if (res.billing_agreement_id) await recordTransaction({ provider: 'paypal-sub', id: res.billing_agreement_id, last_payment: { id: res.id, amount: res.amount }, events: [log] });
+    case 'PAYMENT.SALE.COMPLETED': {
+      if (!res.billing_agreement_id) break;
+      const tx = await getJSON('transactions', `paypal-sub:${res.billing_agreement_id}`);
+      // Un pagamento successivo riuscito toglie il blocco lasciato dal rimborso del pagamento precedente.
+      const clears = tx?.payment_hold && tx.payment_hold !== res.id;
+      await recordTransaction({ provider: 'paypal-sub', id: res.billing_agreement_id, last_payment: { id: res.id, amount: res.amount }, ...(clears && { payment_hold: null }), events: [log] });
+      if (tx?.license && findProduct(tx.sku)) await syncSubscriptionLicense('paypal-sub', res.billing_agreement_id);
       break;
+    }
     default:
       await recordTransaction({ provider: 'paypal-evento', id: ev.id, status: 'ricevuto', events: [log] });
   }
