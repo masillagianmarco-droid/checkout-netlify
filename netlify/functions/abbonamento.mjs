@@ -103,7 +103,7 @@ async function viewResult(request, url, payment, offerId, offer) {
       amount: paid.value, currency: paid.currency_code, mode: payment.live ? 'live' : 'sandbox',
       events: [{ at: new Date().toISOString(), type: 'abbonamento_attivato' }],
     }));
-    const delivered = await safely(() => fulfil({ provider: 'paypal-sub', id: session.id, product: findProduct(offer.sku), expiresAt: null }));
+    const delivered = await safely(() => fulfil({ provider: 'paypal-sub', id: session.id, product: findProduct(offer.sku), expiresAt: null, mode: payment.live ? 'live' : 'sandbox' }));
     const licence = delivered?.license ? `<p>La tua chiave di licenza:</p><p class="price">${delivered.license}</p><p><a href="/consegna.html?t=${delivered.token}">Apri la pagina di consegna</a>.</p>` : '<p>La licenza verrà emessa dall’assistenza: conserva il riferimento PayPal dell’abbonamento.</p>';
     return page(payment.live ? 'Abbonamento attivo' : 'Abbonamento di prova attivo',
       `<p>PayPal ha confermato il primo pagamento per ${offer.name}.</p>${licence}<p>Puoi disdire in qualsiasi momento dal tuo conto PayPal: la licenza resta valida fino alla fine del periodo pagato.</p>`, 200, payment.live);

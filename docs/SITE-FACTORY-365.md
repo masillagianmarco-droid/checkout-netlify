@@ -12,8 +12,8 @@ Questo repository è l'**unica infrastruttura di pagamento** di SITE FACTORY 365
 | Configurazione piani Sandbox | `/abbonamento/configura` + `scripts/configura-piano.mjs` | ora possibile in Sandbox anche prima del live (firma HMAC sempre obbligatoria) |
 | Webhook PayPal verificati | `POST /api/paypal/webhook` | `verify-webhook-signature`; rimborsi e storni revocano la licenza; stati degli abbonamenti |
 | Paddle (alternativa) | `POST /api/paddle/webhook`, `GET /api/paddle/delivery`, `POST /api/admin/sync-paddle` | firma `Paddle-Signature` HMAC con tolleranza 5 min; consegna solo se la transazione contiene il prezzo registrato per lo sku: eseguire prima `sync-paddle`, altrimenti resta `da_verificare` |
-| Verifica licenze per i siti | `POST /api/license/verify` | CORS solo verso le origini del catalogo |
-| Consegna | `GET /api/delivery/:token`, `/d/:token` | file da `sf365-files`, massimo 10 scaricamenti; bloccato dopo un rimborso o uno storno, anche per i prodotti senza licenza |
+| Verifica licenze per i siti | `POST /api/license/verify` | CORS solo verso le origini del catalogo; la risposta indica `mode` (`sandbox` o `live`). **In Sandbox il checkout emette licenze e file veri**: ogni licenza e ogni consegna porta l'ambiente in cui è nata e quelle di prova smettono di valere quando le vendite reali sono attive (`licenza_di_prova`, `consegna_di_prova`) |
+| Consegna | `GET /api/delivery/:token`, `/d/:token` | file da `sf365-files`, massimo 10 scaricamenti; richiede un pagamento registrato; bloccato dopo un rimborso o uno storno (PayPal e Paddle), anche per i prodotti senza licenza; lo stato «rimborsato» o «stornato» di un acquisto singolo è definitivo |
 | Registro transazioni | Blobs `sf365-transactions` + `GET /api/admin/transactions?format=csv` | registra anche le vendite delle offerte già esistenti |
 | Collegamento dei siti | `/embed.js` | `<a data-sf365-sku="…">` o `<a data-sf365-sku="…" data-sf365-abbonamento>` |
 | Negozio e condizioni | `/`, `/termini-vendita.html`, `/rimborsi.html`, `/privacy.html`, `/contatti.html` | generati da `npm run pagine` (catalogo + `catalog/seller.mjs`) |

@@ -25,7 +25,10 @@ async function webhook(req, context) {
       }
       const totals = (d.details && d.details.totals) || {};
       await recordTransaction({ provider: "paddle", id: d.id, sku: p.sku, project: p.project, status: "completato", amount: totals.grand_total || null, currency: d.currency_code, subscription_id: d.subscription_id || null, mode: sellable(p, "paddle", context).mode, events: [log] });
-      const out = await fulfil({ provider: "paddle", id: d.id, product: p, expiresAt: p.type === "subscription" ? null : undefined });
+      // Rinnovo di un abbonamento che ha già la sua licenza: nessuna licenza nuova.
+      const sub = d.subscription_id ? await getJSON("transactions", `paddle-sub:${d.subscription_id}`) : null;
+      if (sub && sub.license) { await recordTransaction({ provider: "paddle-sub", id: d.subscription_id, status: "attivo", events: [{ ...log, detail: "rinnovo:" + d.id }] }); break; }
+      const out = await fulfil({ provider: "paddle", id: d.id, product: p, expiresAt: p.type === "subscription" ? null : undefined, mode: sellable(p, "paddle", context).mode });
       if (d.subscription_id) await recordTransaction({ provider: "paddle-sub", id: d.subscription_id, sku: p.sku, status: "attivo", license: out.license, events: [log] });
       break;
     }
@@ -47,9 +50,12 @@ async function webhook(req, context) {
     }
     case "adjustment.created":
     case "adjustment.updated": {
-      if (d.action === "refund" && d.status === "approved" && d.transaction_id) {
+      // Rimborso approvato oppure storno (chargeback) non respinto: la consegna si chiude e la licenza si revoca.
+      const refund = d.action === "refund" && d.status === "approved";
+      const chargeback = d.action === "chargeback" && d.status !== "rejected";
+      if ((refund || chargeback) && d.transaction_id) {
         const tx = await getJSON("transactions", `paddle:${d.transaction_id}`);
-        await recordTransaction({ provider: "paddle", id: d.transaction_id, status: "rimborsato", events: [log] });
+        await recordTransaction({ provider: "paddle", id: d.transaction_id, status: refund ? "rimborsato" : "stornato", events: [log] });
         if (tx && tx.license) await setLicenseStatus(tx.license, "revoked");
       }
       break;

@@ -51,6 +51,18 @@ export default async (req, context) => {
       }
       break;
     }
+    case 'PAYMENT.SALE.REFUNDED':
+    case 'PAYMENT.SALE.REVERSED': {
+      // Rimborso o storno dell'ultimo pagamento di un abbonamento: la licenza si revoca.
+      const saleId = res.sale_id || res.id;
+      for (const k of await listKeys('transactions', 'paypal-sub:')) {
+        const tx = await getJSON('transactions', k);
+        if (!tx || !saleId || tx.last_payment?.id !== saleId) continue;
+        await recordTransaction({ provider: 'paypal-sub', id: tx.id, status: ev.event_type.endsWith('REFUNDED') ? 'rimborsato' : 'stornato', events: [log] });
+        await setLicenseStatus(tx.license, 'revoked');
+      }
+      break;
+    }
     case 'PAYMENT.SALE.COMPLETED':
       if (res.billing_agreement_id) await recordTransaction({ provider: 'paypal-sub', id: res.billing_agreement_id, last_payment: { id: res.id, amount: res.amount }, events: [log] });
       break;

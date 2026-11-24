@@ -171,6 +171,102 @@ test('consegna di un file: il rimborso blocca lo scaricamento anche senza licenz
   assert.equal((await blocked.json()).error, 'pagamento_rimborsato');
 });
 
+// ---- Rilievi della revisione indipendente del 24/11/2026
+const ST = (name) => globalThis.__SF365_TEST_STORE__(name);
+const txOf = (key) => JSON.parse(STORES.transactions.get(key));
+async function paddleEvent(event_type, data) {
+  process.env.PADDLE_WEBHOOK_SECRET = 'pdl_ntfset_test';
+  const raw = JSON.stringify({ event_id: 'evt_' + Math.random().toString(36).slice(2), event_type, data }), ts = Math.floor(Date.now() / 1000);
+  const h1 = createHmac('sha256', process.env.PADDLE_WEBHOOK_SECRET).update(`${ts}:${raw}`).digest('hex');
+  const r = await paddleFn(req('/api/paddle/webhook', 'POST', { 'paddle-signature': `ts=${ts};h1=${h1}` }, raw), { params: { action: 'webhook' } });
+  assert.equal(r.status, 200);
+}
+const paddleSale = (id, extra = {}) => paddleEvent('transaction.completed', { id, currency_code: 'EUR', custom_data: { sku }, items: [{ price: { id: 'pri_giusto' } }], details: { totals: { grand_total: '3900' } }, ...extra });
+const verifyLicence = async (key, context) => (await licenseFn(req('/api/license/verify', 'POST', { 'content-type': 'application/json' }, JSON.stringify({ key })), context)).json();
+
+test('un rimborso è definitivo: un evento «completato» ripetuto non riapre lo scaricamento', async () => {
+  const { fulfil, recordTransaction } = await import('../lib/sf365/core.mjs');
+  const product = PRODUCTS.find((p) => p.delivery.kind === 'download');
+  await recordTransaction({ provider: 'paypal', id: 'ORDFILE2', sku: product.sku, status: 'completato', capture_id: 'CAPFILE2' });
+  const { token } = await fulfil({ provider: 'paypal', id: 'ORDFILE2', product });
+  process.env.PAYPAL_WEBHOOK_ID = 'WH'; mockPayPal(); verify = 'SUCCESS';
+  const h = { 'paypal-auth-algo': 'a', 'paypal-cert-url': 'b', 'paypal-transmission-id': 'c', 'paypal-transmission-sig': 'd', 'paypal-transmission-time': 'e' };
+  const hook = (ev) => webhook(req('/api/paypal/webhook', 'POST', h, JSON.stringify(ev)), {});
+  await hook({ id: 'WH-R2', event_type: 'PAYMENT.CAPTURE.REFUNDED', resource: { id: 'R2', links: [{ rel: 'up', href: 'https://api-m.sandbox.paypal.com/v2/payments/captures/CAPFILE2' }] } });
+  assert.equal(txOf('paypal:ORDFILE2').status, 'rimborsato');
+  await hook({ id: 'WH-C2', event_type: 'PAYMENT.CAPTURE.COMPLETED', resource: { id: 'CAPFILE2', amount: { value: '9.90', currency_code: 'EUR' }, supplementary_data: { related_ids: { order_id: 'ORDFILE2' } } } });
+  assert.equal(txOf('paypal:ORDFILE2').status, 'rimborsato', 'lo stato non torna a completato');
+  assert.equal((await deliveryFn(req(`/d/${token}`), { params: { token } })).status, 403);
+  const info = await (await deliveryFn(req(`/api/delivery/${token}`), { params: { token } })).json();
+  assert.equal(info.download, null); assert.equal(info.payment_status, 'rimborsato');
+});
+
+test('consegna senza pagamento registrato: nessuno scaricamento', async () => {
+  const token = 'tokensenzapagamento000000';
+  await ST('deliveries').setJSON(token, { token, sku: 'forfettario-in-ordine-2026', license: null, source: 'paypal:INESISTENTE', file: 'sf365/forfettario-in-ordine-2026-v1.0.zip', downloads: 0 });
+  const r = await deliveryFn(req(`/d/${token}`), { params: { token } });
+  assert.equal(r.status, 403); assert.equal((await r.json()).error, 'pagamento_non_registrato');
+});
+
+test('Paddle: storno (chargeback) che revoca la licenza; rimborso non approvato senza effetto', async () => {
+  await ST('provider-ids').setJSON(sku, { paddle_env: 'sandbox', paddle_price_id: 'pri_giusto', paddle_price: '39.00' });
+  await paddleSale('txn_01storno00001');
+  const lic = txOf('paddle:txn_01storno00001').license;
+  assert.equal((await verifyLicence(lic)).valid, true);
+  await paddleEvent('adjustment.created', { id: 'adj_1', action: 'refund', status: 'pending_approval', transaction_id: 'txn_01storno00001' });
+  assert.equal((await verifyLicence(lic)).valid, true);
+  await paddleEvent('adjustment.created', { id: 'adj_2', action: 'chargeback', status: 'approved', transaction_id: 'txn_01storno00001' });
+  assert.equal(txOf('paddle:txn_01storno00001').status, 'stornato');
+  assert.equal((await verifyLicence(lic)).reason, 'revoked');
+  await paddleSale('txn_01storno00001');
+  assert.equal(txOf('paddle:txn_01storno00001').status, 'stornato', 'evento ripetuto: lo storno resta');
+});
+
+test('Paddle: il rinnovo di un abbonamento non emette una seconda licenza', async () => {
+  await paddleSale('txn_01abbonam0001', { subscription_id: 'sub_01abc' });
+  const lic = txOf('paddle:txn_01abbonam0001').license;
+  const before = STORES.licenses.size;
+  await paddleSale('txn_01abbonam0002', { subscription_id: 'sub_01abc' });
+  assert.equal(STORES.licenses.size, before, 'nessuna licenza nuova al rinnovo');
+  assert.equal(txOf('paddle-sub:sub_01abc').license, lic);
+  await paddleEvent('subscription.canceled', { id: 'sub_01abc' });
+  assert.equal((await verifyLicence(lic)).valid, false);
+});
+
+test('abbonamento PayPal: il rimborso dell’ultimo pagamento revoca la licenza', async () => {
+  const { fulfil, recordTransaction } = await import('../lib/sf365/core.mjs');
+  const product = PRODUCTS.find((p) => p.type === 'subscription');
+  const { license } = await fulfil({ provider: 'paypal-sub', id: 'I-ABCDEFGH1234', product, expiresAt: null });
+  await recordTransaction({ provider: 'paypal-sub', id: 'I-ABCDEFGH1234', status: 'attivo', last_payment: { id: 'SALE1' } });
+  process.env.PAYPAL_WEBHOOK_ID = 'WH'; mockPayPal(); verify = 'SUCCESS';
+  const h = { 'paypal-auth-algo': 'a', 'paypal-cert-url': 'b', 'paypal-transmission-id': 'c', 'paypal-transmission-sig': 'd', 'paypal-transmission-time': 'e' };
+  assert.equal((await verifyLicence(license)).valid, true);
+  const r = await webhook(req('/api/paypal/webhook', 'POST', h, JSON.stringify({ id: 'WH-S1', event_type: 'PAYMENT.SALE.REFUNDED', resource: { id: 'REF1', sale_id: 'SALE1' } })), {});
+  assert.equal(r.status, 200);
+  assert.equal((await verifyLicence(license)).reason, 'revoked');
+});
+
+test('licenze e file emessi in prova non valgono quando le vendite reali sono attive', async () => {
+  const { fulfil, recordTransaction } = await import('../lib/sf365/core.mjs');
+  const product = PRODUCTS.find((p) => p.delivery.kind === 'license');
+  await recordTransaction({ provider: 'paypal', id: 'ORDPROVA1', sku: product.sku, status: 'completato' });
+  const prova = await fulfil({ provider: 'paypal', id: 'ORDPROVA1', product });
+  await recordTransaction({ provider: 'paypal', id: 'ORDVERO1', sku: product.sku, status: 'completato' });
+  const vera = await fulfil({ provider: 'paypal', id: 'ORDVERO1', product, mode: 'live' });
+  const produzione = { deploy: { context: 'production' } };
+  assert.equal((await verifyLicence(prova.license, produzione)).valid, true, 'in prova la licenza di prova vale');
+  const prima = process.env.PAYPAL_LIVE_ENABLED;
+  process.env.PAYPAL_LIVE_ENABLED = 'true';
+  try {
+    const v = await verifyLicence(prova.license, produzione);
+    assert.equal(v.valid, false); assert.equal(v.reason, 'licenza_di_prova');
+    assert.equal((await verifyLicence(vera.license, produzione)).valid, true);
+    assert.equal((await verifyLicence(prova.license, { deploy: { context: 'deploy-preview' } })).valid, true, 'fuori dalla produzione PayPal resta in prova');
+  } finally {
+    if (prima === undefined) delete process.env.PAYPAL_LIVE_ENABLED; else process.env.PAYPAL_LIVE_ENABLED = prima;
+  }
+});
+
 test('amministrazione: token obbligatorio, registro esportabile in CSV', async () => {
   process.env.ADMIN_TOKEN = 'z'.repeat(32);
   assert.equal((await adminFn(req('/api/admin/transactions'), { params: { action: 'transactions' } })).status, 401);

@@ -157,7 +157,7 @@ async function completeCheckout(orderId, nonce, session, token, payment, url) {
       events: [{ at: new Date().toISOString(), type: 'pagamento_catturato' }],
     }));
     if (session.offer.sf365) {
-      const delivered = await safely(() => fulfil({ provider: 'paypal', id: orderId, product: findProduct(session.offerId) }));
+      const delivered = await safely(() => fulfil({ provider: 'paypal', id: orderId, product: findProduct(session.offerId), mode: payment.live ? 'live' : 'sandbox' }));
       if (!delivered) {
         return page('Consegna da verificare', `<p>Il pagamento risulta completato. Conserva il riferimento PayPal ${orderId} e scrivi all’assistenza: la licenza verrà emessa manualmente.</p>`, 202, payment.live);
       }

@@ -1,7 +1,7 @@
 // Verifica delle licenze per tutti i siti SITE FACTORY 365 (CORS solo verso i siti del catalogo).
-import { json, readJson, getJSON, corsHeaders } from "../../lib/sf365/core.mjs";
+import { json, readJson, getJSON, corsHeaders, usableInThisMode } from "../../lib/sf365/core.mjs";
 
-export default async (req) => {
+export default async (req, context) => {
   const cors = corsHeaders(req);
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
   if (req.method !== "POST") return json({ valid: false, reason: "metodo" }, 405, cors);
@@ -16,8 +16,10 @@ export default async (req) => {
   const family = (s) => s.replace(/-(12m|mensile|annuale)$/, "");
   if (sku && family(lic.sku) !== family(sku)) return json({ valid: false, reason: "prodotto_diverso" }, 200, cors);
   if (lic.status !== "active") return json({ valid: false, reason: lic.status }, 200, cors);
+  // Una licenza emessa con un pagamento di prova non vale quando le vendite reali sono attive.
+  if (!usableInThisMode(lic, context)) return json({ valid: false, reason: "licenza_di_prova" }, 200, cors);
   if (lic.expires_at && new Date(lic.expires_at) < new Date()) return json({ valid: false, reason: "scaduta" }, 200, cors);
-  return json({ valid: true, sku: lic.sku, expires_at: lic.expires_at || null }, 200, cors);
+  return json({ valid: true, sku: lic.sku, expires_at: lic.expires_at || null, mode: lic.mode === "live" ? "live" : "sandbox" }, 200, cors);
 };
 
 export const config = { path: "/api/license/verify" };
