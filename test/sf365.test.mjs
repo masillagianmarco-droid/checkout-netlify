@@ -25,7 +25,7 @@ globalThis.__SF365_TEST_STORE__ = (name) => {
   };
 };
 const origin = 'https://checkout.example.test';
-const sku = 'dpa-studio-pro-12m';
+const sku = 'avvicendo-pro-12m'; // prodotto di prova: DPA Studio è sospeso (draft) dal 24/11
 const orderId = 'ABCDEF0123456789Z';
 let verify = 'SUCCESS';
 let captured = false;
@@ -38,12 +38,12 @@ function mockPayPal() {
     if (url.pathname === '/v1/notifications/verify-webhook-signature') return Response.json({ verification_status: verify });
     if (url.pathname === '/v2/checkout/orders') {
       const body = JSON.parse(options.body);
-      assert.deepEqual(body.purchase_units[0].amount, { currency_code: 'EUR', value: '39.00' });
+      assert.deepEqual(body.purchase_units[0].amount, { currency_code: 'EUR', value: '34.90' });
       return Response.json({ id: orderId, links: [{ rel: 'payer-action', href: `https://www.sandbox.paypal.com/checkoutnow?token=${orderId}` }] });
     }
     if (url.pathname.startsWith(`/v2/checkout/orders/${orderId}`)) {
       captured = true;
-      return Response.json({ id: orderId, status: 'COMPLETED', purchase_units: [{ reference_id: sku, payments: { captures: [{ id: 'CAP1', status: 'COMPLETED', amount: { currency_code: 'EUR', value: '39.00' } }] } }] });
+      return Response.json({ id: orderId, status: 'COMPLETED', purchase_units: [{ reference_id: sku, payments: { captures: [{ id: 'CAP1', status: 'COMPLETED', amount: { currency_code: 'EUR', value: '34.90' } }] } }] });
     }
     throw new Error('Chiamata non simulata: ' + url.pathname);
   };
@@ -59,7 +59,7 @@ test('acquisto singolo SF365 nel checkout esistente: licenza emessa, registrata 
   process.env.PAYPAL_CLIENT_ID = 'cid'; process.env.PAYPAL_CLIENT_SECRET = 'sec';
   mockPayPal();
   const page = await checkout(req(`/checkout?offerta=${sku}`));
-  assert.match(await page.text(), /39,00 €/);
+  assert.match(await page.text(), /34,90 €/);
   const start = await checkout(req(`/checkout?offerta=${sku}&prezzo=0.01`, 'POST'));
   assert.equal(start.status, 303);
   const cookie = start.headers.get('Set-Cookie').split(';')[0];
@@ -71,8 +71,8 @@ test('acquisto singolo SF365 nel checkout esistente: licenza emessa, registrata 
   const again = await (await checkout(req(`/checkout/ritorno?sessione=${nonce}&token=${orderId}`, 'POST', { Cookie: cookie }))).text();
   assert.ok(again.includes(lic), 'consegna idempotente');
   const tx = JSON.parse(STORES.transactions.get(`paypal:${orderId}`));
-  assert.equal(tx.status, 'completato'); assert.equal(tx.amount, '39.00'); assert.equal(tx.license, lic);
-  const v = await (await licenseFn(req('/api/license/verify', 'POST', { 'content-type': 'application/json', origin: 'https://dpa-studio.netlify.app' }, JSON.stringify({ key: lic, sku })))).json();
+  assert.equal(tx.status, 'completato'); assert.equal(tx.amount, '34.90'); assert.equal(tx.license, lic);
+  const v = await (await licenseFn(req('/api/license/verify', 'POST', { 'content-type': 'application/json', origin: 'https://avvicendo.netlify.app' }, JSON.stringify({ key: lic, sku })))).json();
   assert.equal(v.valid, true);
   const token = tx.delivery_token;
   const d = await (await deliveryFn(req('/api/delivery/' + token), { params: { token } })).json();
@@ -99,8 +99,8 @@ test('webhook PayPal: firma rifiutata, rimborso che revoca la licenza', async ()
 });
 
 test('abbonamenti SF365 mensile e annuale: piani PayPal con il periodo corretto', async () => {
-  const yearly = subscriptions.get('dpa-studio-pro-annuale');
-  const monthly = subscriptions.get('dpa-studio-pro-mensile');
+  const yearly = subscriptions.get('avvicendo-pro-annuale');
+  const monthly = subscriptions.get('avvicendo-pro-mensile');
   assert.equal(yearly.interval, 'YEAR'); assert.equal(monthly.interval, 'MONTH');
   let createdBody;
   globalThis.fetch = async (input, options = {}) => {
@@ -110,7 +110,7 @@ test('abbonamenti SF365 mensile e annuale: piani PayPal con il periodo corretto'
     if (url.pathname === '/v1/billing/plans' && !options.body) return Response.json({ plans: [] });
     if (url.pathname === '/v1/billing/plans') { createdBody = JSON.parse(options.body); return Response.json({ id: 'P-ABCDEFGHIJKLMNOPQRSTUVWX' }); }
     if (url.pathname.startsWith('/v1/billing/plans/')) {
-      return Response.json({ id: 'P-ABCDEFGHIJKLMNOPQRSTUVWX', status: 'ACTIVE', product_id: yearly.productId, billing_cycles: [{ tenure_type: 'REGULAR', total_cycles: 0, frequency: { interval_unit: 'YEAR', interval_count: 1 }, pricing_scheme: { fixed_price: { value: '39.00', currency_code: 'EUR' } } }], payment_preferences: { auto_bill_outstanding: false } });
+      return Response.json({ id: 'P-ABCDEFGHIJKLMNOPQRSTUVWX', status: 'ACTIVE', product_id: yearly.productId, billing_cycles: [{ tenure_type: 'REGULAR', total_cycles: 0, frequency: { interval_unit: 'YEAR', interval_count: 1 }, pricing_scheme: { fixed_price: { value: '29.00', currency_code: 'EUR' } } }], payment_preferences: { auto_bill_outstanding: false } });
     }
     throw new Error(url.pathname);
   };
@@ -121,7 +121,7 @@ test('abbonamenti SF365 mensile e annuale: piani PayPal con il periodo corretto'
 
 test('la configurazione dei piani Sandbox non richiede il live; il live resta bloccato', async () => {
   delete process.env.CHECKOUT_ORDER_SIGNING_KEY;
-  const r = await subscription(req('/abbonamento/configura?offerta=dpa-studio-pro-mensile&ambiente=live', 'POST'), { deploy: { context: 'production' } });
+  const r = await subscription(req('/abbonamento/configura?offerta=avvicendo-pro-mensile&ambiente=live', 'POST'), { deploy: { context: 'production' } });
   assert.equal(r.status, 404);
 });
 
@@ -137,7 +137,7 @@ test('vendite reali bloccate senza autorizzazione esplicita e prodotto live', as
 test('Paddle: firma HMAC verificata e consegna solo con il prezzo registrato per lo sku', async () => {
   process.env.PADDLE_WEBHOOK_SECRET = 'pdl_ntfset_test';
   const send = async (id, items) => {
-    const ev = { event_id: 'evt_' + id, event_type: 'transaction.completed', data: { id, currency_code: 'EUR', custom_data: { sku }, items, details: { totals: { grand_total: '3900' } } } };
+    const ev = { event_id: 'evt_' + id, event_type: 'transaction.completed', data: { id, currency_code: 'EUR', custom_data: { sku }, items, details: { totals: { grand_total: '3490' } } } };
     const raw = JSON.stringify(ev), ts = Math.floor(Date.now() / 1000);
     const h1 = createHmac('sha256', process.env.PADDLE_WEBHOOK_SECRET).update(`${ts}:${raw}`).digest('hex');
     assert.equal((await paddleFn(req('/api/paddle/webhook', 'POST', { 'paddle-signature': `ts=${ts};h1=${'0'.repeat(64)}` }, raw), { params: { action: 'webhook' } })).status, 400);
@@ -147,7 +147,7 @@ test('Paddle: firma HMAC verificata e consegna solo con il prezzo registrato per
   // Prezzo non ancora registrato (sync-paddle mai eseguito): nessuna consegna, transazione da verificare.
   assert.equal((await send('txn_01senzaprezzo', [{ price: { id: 'pri_altro' } }])).status, 202);
   assert.equal(JSON.parse(STORES.transactions.get('paddle:txn_01senzaprezzo')).status, 'da_verificare');
-  await globalThis.__SF365_TEST_STORE__('provider-ids').setJSON(sku, { paddle_env: 'sandbox', paddle_price_id: 'pri_giusto', paddle_price: '39.00' });
+  await globalThis.__SF365_TEST_STORE__('provider-ids').setJSON(sku, { paddle_env: 'sandbox', paddle_price_id: 'pri_giusto', paddle_price: '34.90' });
   // Sku dichiarato dal browser ma prezzo pagato diverso: nessuna consegna.
   assert.equal((await send('txn_01prezzodiverso', [{ price: { id: 'pri_altro' } }])).status, 202);
   assert.equal(JSON.parse(STORES.transactions.get('paddle:txn_01prezzodiverso')).delivery_token, undefined);
@@ -181,7 +181,7 @@ async function paddleEvent(event_type, data) {
   const r = await paddleFn(req('/api/paddle/webhook', 'POST', { 'paddle-signature': `ts=${ts};h1=${h1}` }, raw), { params: { action: 'webhook' } });
   assert.equal(r.status, 200);
 }
-const paddleSale = (id, extra = {}) => paddleEvent('transaction.completed', { id, currency_code: 'EUR', custom_data: { sku }, items: [{ price: { id: 'pri_giusto' } }], details: { totals: { grand_total: '3900' } }, ...extra });
+const paddleSale = (id, extra = {}) => paddleEvent('transaction.completed', { id, currency_code: 'EUR', custom_data: { sku }, items: [{ price: { id: 'pri_giusto' } }], details: { totals: { grand_total: '3490' } }, ...extra });
 const verifyLicence = async (key, context) => (await licenseFn(req('/api/license/verify', 'POST', { 'content-type': 'application/json' }, JSON.stringify({ key })), context)).json();
 
 test('un rimborso è definitivo: un evento «completato» ripetuto non riapre lo scaricamento', async () => {
@@ -209,7 +209,7 @@ test('consegna senza pagamento registrato: nessuno scaricamento', async () => {
 });
 
 test('Paddle: storno (chargeback) che revoca la licenza; rimborso non approvato senza effetto', async () => {
-  await ST('provider-ids').setJSON(sku, { paddle_env: 'sandbox', paddle_price_id: 'pri_giusto', paddle_price: '39.00' });
+  await ST('provider-ids').setJSON(sku, { paddle_env: 'sandbox', paddle_price_id: 'pri_giusto', paddle_price: '34.90' });
   await paddleSale('txn_01storno00001');
   const lic = txOf('paddle:txn_01storno00001').license;
   assert.equal((await verifyLicence(lic)).valid, true);
@@ -288,7 +288,7 @@ test('amministrazione: token obbligatorio, registro esportabile in CSV', async (
 test('catalogo pubblico con i collegamenti di acquisto', async () => {
   const j = await (await apiFn(req('/api/catalog'), {})).json();
   assert.ok(j.products.some((p) => p.buy === `/checkout?offerta=${sku}`));
-  assert.ok(j.products.some((p) => p.buy === '/abbonamento?offerta=dpa-studio-pro-annuale'));
+  assert.ok(j.products.some((p) => p.buy === '/abbonamento?offerta=avvicendo-pro-annuale'));
 });
 
 // ---- Punti 2, 3 e 4 rimasti aperti dopo la revisione indipendente (chiusi il 24/11/2026)
@@ -324,7 +324,7 @@ test('punto 2 — PayPal: dopo un rimborso solo un pagamento nuovo riattiva; dis
 });
 
 test('punto 3 — Paddle: rimborso o storno di un rinnovo bloccano l’abbonamento; il rinnovo pagato successivo lo sblocca', async () => {
-  await ST('provider-ids').setJSON(sku, { paddle_env: 'sandbox', paddle_price_id: 'pri_giusto', paddle_price: '39.00' });
+  await ST('provider-ids').setJSON(sku, { paddle_env: 'sandbox', paddle_price_id: 'pri_giusto', paddle_price: '34.90' });
   await paddleSale('txn_01p3primo00001', { subscription_id: 'sub_01punto3' });
   const lic = txOf('paddle-sub:sub_01punto3').license;
   await paddleSale('txn_01p3rinnovo001', { subscription_id: 'sub_01punto3' });
@@ -345,7 +345,7 @@ test('punto 3 — Paddle: rimborso o storno di un rinnovo bloccano l’abbonamen
 });
 
 test('punto 4 — storno annullato (chargeback_reverse) e riattivazione manuale con motivo', async () => {
-  await ST('provider-ids').setJSON(sku, { paddle_env: 'sandbox', paddle_price_id: 'pri_giusto', paddle_price: '39.00' });
+  await ST('provider-ids').setJSON(sku, { paddle_env: 'sandbox', paddle_price_id: 'pri_giusto', paddle_price: '34.90' });
   await paddleSale('txn_01p4singolo001');
   const lic = txOf('paddle:txn_01p4singolo001').license;
   await paddleEvent('adjustment.created', { id: 'adj_p4a', action: 'chargeback', status: 'approved', transaction_id: 'txn_01p4singolo001' });
@@ -372,7 +372,7 @@ test('punto 4 — storno annullato (chargeback_reverse) e riattivazione manuale 
 
 // ---- Rilievi della seconda revisione indipendente (24/11/2026) e mutazioni sopravvissute
 test('riconsegna di un pagamento vecchio dopo il rimborso del più recente: il blocco resta (Paddle e PayPal)', async () => {
-  await ST('provider-ids').setJSON(sku, { paddle_env: 'sandbox', paddle_price_id: 'pri_giusto', paddle_price: '39.00' });
+  await ST('provider-ids').setJSON(sku, { paddle_env: 'sandbox', paddle_price_id: 'pri_giusto', paddle_price: '34.90' });
   await paddleSale('txn_01s1r1000001', { subscription_id: 'sub_01s1' });
   const lic = txOf('paddle-sub:sub_01s1').license;
   await paddleSale('txn_01s1r2000001', { subscription_id: 'sub_01s1' });
@@ -396,7 +396,7 @@ test('riconsegna di un pagamento vecchio dopo il rimborso del più recente: il b
 });
 
 test('rimborso, poi storno, poi storno annullato: l’acquisto resta rimborsato', async () => {
-  await ST('provider-ids').setJSON(sku, { paddle_env: 'sandbox', paddle_price_id: 'pri_giusto', paddle_price: '39.00' });
+  await ST('provider-ids').setJSON(sku, { paddle_env: 'sandbox', paddle_price_id: 'pri_giusto', paddle_price: '34.90' });
   await paddleSale('txn_01s4rimb00001');
   const lic = txOf('paddle:txn_01s4rimb00001').license;
   await paddleEvent('adjustment.created', { id: 'adj_s4a', action: 'refund', status: 'approved', transaction_id: 'txn_01s4rimb00001' });
@@ -407,7 +407,7 @@ test('rimborso, poi storno, poi storno annullato: l’acquisto resta rimborsato'
 });
 
 test('abbonamenti: past_due non revoca; lo storno annullato toglie solo il proprio blocco', async () => {
-  await ST('provider-ids').setJSON(sku, { paddle_env: 'sandbox', paddle_price_id: 'pri_giusto', paddle_price: '39.00' });
+  await ST('provider-ids').setJSON(sku, { paddle_env: 'sandbox', paddle_price_id: 'pri_giusto', paddle_price: '34.90' });
   await paddleSale('txn_01m10a00001', { subscription_id: 'sub_01m10' });
   const lic = txOf('paddle-sub:sub_01m10').license;
   await paddleEvent('subscription.past_due', { id: 'sub_01m10' });
@@ -428,7 +428,7 @@ test('riattivazione manuale di un abbonamento: toglie il blocco e segue il ciclo
   const call = (body) => adminFn(req('/api/admin/reactivate', 'POST', auth, body), { params: { action: 'reactivate' } });
   assert.equal((await call('{non json')).status, 400);
   // Paddle: blocco tolto a mano
-  await ST('provider-ids').setJSON(sku, { paddle_env: 'sandbox', paddle_price_id: 'pri_giusto', paddle_price: '39.00' });
+  await ST('provider-ids').setJSON(sku, { paddle_env: 'sandbox', paddle_price_id: 'pri_giusto', paddle_price: '34.90' });
   await paddleSale('txn_01m11a00001', { subscription_id: 'sub_01m11' });
   const lic = txOf('paddle-sub:sub_01m11').license;
   await paddleEvent('adjustment.created', { id: 'adj_m11', action: 'refund', status: 'approved', transaction_id: 'txn_01m11a00001' });
@@ -457,7 +457,7 @@ test('riattivazione manuale di un abbonamento: toglie il blocco e segue il ciclo
 
 // ---- Rilievi della revisione parallela (Claude_QA 2026-11-24_REVISIONE_PR5_PR4) non ancora coperti
 test('eventi del ciclo di vita arrivati in ritardo non riattivano una licenza chiusa (Paddle e PayPal)', async () => {
-  await ST('provider-ids').setJSON(sku, { paddle_env: 'sandbox', paddle_price_id: 'pri_giusto', paddle_price: '39.00' });
+  await ST('provider-ids').setJSON(sku, { paddle_env: 'sandbox', paddle_price_id: 'pri_giusto', paddle_price: '34.90' });
   await paddleSale('txn_01ordine0001', { subscription_id: 'sub_01ordine' });
   const lic = txOf('paddle-sub:sub_01ordine').license;
   process.env.PADDLE_WEBHOOK_SECRET = 'pdl_ntfset_test';
@@ -510,7 +510,7 @@ test('rimborsi PayPal trovati tramite indice; record vecchi senza indice ancora 
 });
 
 test('rimborso arrivato prima della conferma: nessuna licenza; download bloccato a licenza scaduta', async () => {
-  await ST('provider-ids').setJSON(sku, { paddle_env: 'sandbox', paddle_price_id: 'pri_giusto', paddle_price: '39.00' });
+  await ST('provider-ids').setJSON(sku, { paddle_env: 'sandbox', paddle_price_id: 'pri_giusto', paddle_price: '34.90' });
   await paddleEvent('adjustment.created', { id: 'adj_prima', action: 'refund', status: 'approved', transaction_id: 'txn_01rimbprima01' });
   await paddleSale('txn_01rimbprima01');
   const tx = txOf('paddle:txn_01rimbprima01');
@@ -536,8 +536,8 @@ async function paddleAt(event_type, data, occurred_at) {
   assert.equal(r.status, 200);
 }
 test('Paddle: rinnovo consegnato in ritardo dopo la disdetta non riattiva; evento senza data dopo uno datato ignorato', async () => {
-  await ST('provider-ids').setJSON(sku, { paddle_env: 'sandbox', paddle_price_id: 'pri_giusto', paddle_price: '39.00' });
-  const sale = (id, at) => paddleAt('transaction.completed', { id, currency_code: 'EUR', custom_data: { sku }, items: [{ price: { id: 'pri_giusto' } }], details: { totals: { grand_total: '3900' } }, subscription_id: 'sub_01ritardo' }, at);
+  await ST('provider-ids').setJSON(sku, { paddle_env: 'sandbox', paddle_price_id: 'pri_giusto', paddle_price: '34.90' });
+  const sale = (id, at) => paddleAt('transaction.completed', { id, currency_code: 'EUR', custom_data: { sku }, items: [{ price: { id: 'pri_giusto' } }], details: { totals: { grand_total: '3490' } }, subscription_id: 'sub_01ritardo' }, at);
   await sale('txn_01rit000001', '2026-11-24T10:00:00Z');
   const lic = txOf('paddle-sub:sub_01ritardo').license;
   await paddleAt('subscription.canceled', { id: 'sub_01ritardo' }, '2026-11-24T12:00:00Z');
@@ -550,7 +550,7 @@ test('Paddle: rinnovo consegnato in ritardo dopo la disdetta non riattiva; event
 });
 
 test('Paddle: abbonamento rimborsato prima della conferma: nessuna licenza e nessun errore', async () => {
-  await ST('provider-ids').setJSON(sku, { paddle_env: 'sandbox', paddle_price_id: 'pri_giusto', paddle_price: '39.00' });
+  await ST('provider-ids').setJSON(sku, { paddle_env: 'sandbox', paddle_price_id: 'pri_giusto', paddle_price: '34.90' });
   await paddleEvent('adjustment.created', { id: 'adj_subprima', action: 'refund', status: 'approved', transaction_id: 'txn_01subprima01' });
   await paddleSale('txn_01subprima01', { subscription_id: 'sub_01prima' });
   assert.equal(STORES.transactions.has('paddle-sub:sub_01prima'), false);

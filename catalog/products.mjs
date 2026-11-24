@@ -15,6 +15,8 @@
  */
 export const PRODUCTS = [
   {
+    // SOSPESO il 24/11/2026 (decisione del titolare: nessuno sviluppo commerciale che si sovrapponga ai progetti
+    // professionali del padre). status "draft" = non vendibile e non elencato; voci conservate per lo storico.
     sku: "dpa-studio-pro-12m",
     project: "SF365-0001",
     owner_ai: "Claude",
@@ -27,7 +29,7 @@ export const PRODUCTS = [
     tax_category: "standard",
     delivery: { kind: "license", license_days: 365 },
     return_url: "https://dpa-studio.netlify.app/app",
-    status: "sandbox"
+    status: "draft"
   },
   {
     sku: "dpa-studio-pro-mensile",
@@ -43,7 +45,7 @@ export const PRODUCTS = [
     tax_category: "standard",
     delivery: { kind: "license" },
     return_url: "https://dpa-studio.netlify.app/app",
-    status: "sandbox"
+    status: "draft"
   },
   {
     sku: "dpa-studio-pro-annuale",
@@ -59,31 +61,31 @@ export const PRODUCTS = [
     tax_category: "standard",
     delivery: { kind: "license" },
     return_url: "https://dpa-studio.netlify.app/app",
-    status: "sandbox"
+    status: "draft"
   },
   {
-    // SF365-0002 (Claude, 24/11/2026). Prezzi proposti, da approvare: sotto i servizi in abbonamento per dipendente,
-    // perché lo strumento funziona solo nel browser, senza account né sincronizzazione.
-    sku: "turnichiari-pro-12m",
+    // SF365-0002 (Claude, 24/11/2026; già «TurniChiari», rinominato Avvicendo). Listino iniziale deciso dal titolare
+    // il 24/11 (15:38), in Sandbox: Free gratuito, Pro mensile 3,90 €, Pro annuale 29 €, licenza 12 mesi senza rinnovo 34,90 €.
+    sku: "avvicendo-pro-12m",
     project: "SF365-0002",
     owner_ai: "Claude",
-    site: "https://turnichiari.netlify.app",
-    name: "TurniChiari — Licenza Pro 12 mesi",
+    site: "https://avvicendo.netlify.app",
+    name: "Avvicendo — Licenza Pro 12 mesi",
     description: "Pianificatore dei turni di lavoro: fino a 60 persone, piani fino a 4 settimane, esportazione CSV, calendari .ics per ogni persona, 20 piani salvati. Licenza personale valida 12 mesi.",
     type: "one_time",
-    price: "29.00",
+    price: "34.90",
     currency: "EUR",
     tax_category: "standard",
     delivery: { kind: "license", license_days: 365 },
-    return_url: "https://turnichiari.netlify.app/app",
+    return_url: "https://avvicendo.netlify.app/app",
     status: "sandbox"
   },
   {
-    sku: "turnichiari-pro-mensile",
+    sku: "avvicendo-pro-mensile",
     project: "SF365-0002",
     owner_ai: "Claude",
-    site: "https://turnichiari.netlify.app",
-    name: "TurniChiari — Abbonamento Pro mensile",
+    site: "https://avvicendo.netlify.app",
+    name: "Avvicendo — Abbonamento Pro mensile",
     description: "Le stesse funzioni della licenza Pro, con rinnovo mensile e disdetta in qualsiasi momento.",
     type: "subscription",
     interval: "month",
@@ -91,15 +93,15 @@ export const PRODUCTS = [
     currency: "EUR",
     tax_category: "standard",
     delivery: { kind: "license" },
-    return_url: "https://turnichiari.netlify.app/app",
+    return_url: "https://avvicendo.netlify.app/app",
     status: "sandbox"
   },
   {
-    sku: "turnichiari-pro-annuale",
+    sku: "avvicendo-pro-annuale",
     project: "SF365-0002",
     owner_ai: "Claude",
-    site: "https://turnichiari.netlify.app",
-    name: "TurniChiari — Abbonamento Pro annuale",
+    site: "https://avvicendo.netlify.app",
+    name: "Avvicendo — Abbonamento Pro annuale",
     description: "Licenza Pro con rinnovo automatico annuale e disdetta in qualsiasi momento.",
     type: "subscription",
     interval: "year",
@@ -107,7 +109,7 @@ export const PRODUCTS = [
     currency: "EUR",
     tax_category: "standard",
     delivery: { kind: "license" },
-    return_url: "https://turnichiari.netlify.app/app",
+    return_url: "https://avvicendo.netlify.app/app",
     status: "sandbox"
   },
   {
