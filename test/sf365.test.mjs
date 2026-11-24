@@ -262,6 +262,16 @@ test('licenze e file emessi in prova non valgono quando le vendite reali sono at
     assert.equal(v.valid, false); assert.equal(v.reason, 'licenza_di_prova');
     assert.equal((await verifyLicence(vera.license, produzione)).valid, true);
     assert.equal((await verifyLicence(prova.license, { deploy: { context: 'deploy-preview' } })).valid, true, 'fuori dalla produzione PayPal resta in prova');
+    // Stessa regola per i file: la consegna di prova non si scarica in produzione, quella reale sì.
+    const file = PRODUCTS.find((p) => p.delivery.kind === 'download');
+    await ST('files').set(file.delivery.file, new TextEncoder().encode('zip').buffer);
+    await recordTransaction({ provider: 'paypal', id: 'ORDFILEPROVA', sku: file.sku, status: 'completato' });
+    const fp = await fulfil({ provider: 'paypal', id: 'ORDFILEPROVA', product: file });
+    await recordTransaction({ provider: 'paypal', id: 'ORDFILEVERO', sku: file.sku, status: 'completato' });
+    const fv = await fulfil({ provider: 'paypal', id: 'ORDFILEVERO', product: file, mode: 'live' });
+    const bloccato = await deliveryFn(req(`/d/${fp.token}`), { params: { token: fp.token }, ...produzione });
+    assert.equal(bloccato.status, 403); assert.equal((await bloccato.json()).error, 'consegna_di_prova');
+    assert.equal((await deliveryFn(req(`/d/${fv.token}`), { params: { token: fv.token }, ...produzione })).status, 200);
   } finally {
     if (prima === undefined) delete process.env.PAYPAL_LIVE_ENABLED; else process.env.PAYPAL_LIVE_ENABLED = prima;
   }
