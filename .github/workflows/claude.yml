@@ -11,7 +11,9 @@ on:
     types: [created]
   pull_request_review_comment:
     types: [created]
-  pull_request:
+  # pull_request_target: il workflow e i segreti vengono SEMPRE dal ramo di base, mai dal ramo in revisione.
+  # Il codice della richiesta non viene eseguito: si legge solo con «gh pr diff».
+  pull_request_target:
     types: [labeled]
 
 concurrency:
@@ -21,7 +23,7 @@ concurrency:
 jobs:
   su-richiesta:
     if: >-
-      github.event_name != 'pull_request' &&
+      github.event_name != 'pull_request_target' &&
       contains(github.event.comment.body, '@claude') &&
       github.event.comment.author_association == 'OWNER'
     runs-on: ubuntu-latest
@@ -65,7 +67,7 @@ jobs:
 
   revisione:
     if: >-
-      github.event_name == 'pull_request' &&
+      github.event_name == 'pull_request_target' &&
       github.event.label.name == 'revisione-claude' &&
       github.event.sender.login == github.repository_owner &&
       github.event.pull_request.head.repo.full_name == github.repository
@@ -83,8 +85,9 @@ jobs:
       - name: Segreto mancante
         if: env.HAS_TOKEN != 'true'
         run: echo "::notice::CLAUDE_CODE_OAUTH_TOKEN non configurato, nessuna esecuzione."
-      # Il revisore lavora sul ramo di BASE: CLAUDE.md, REVIEW.md, .claude/ (hook, impostazioni, agenti) e i
-      # workflow vengono da lì, non dal ramo in revisione, che un'altra IA potrebbe aver modificato.
+      # Il revisore lavora sul ramo di BASE: con pull_request_target workflow e segreti vengono dal ramo di base,
+      # e il checkout del commit di base porta da lì anche CLAUDE.md, REVIEW.md e .claude/ (hook, impostazioni,
+      # agenti). Il ramo in revisione, che un'altra IA potrebbe aver modificato, non viene mai estratto né eseguito.
       # Le modifiche si leggono solo con «gh pr diff».
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         if: env.HAS_TOKEN == 'true'

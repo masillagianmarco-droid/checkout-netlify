@@ -22,6 +22,8 @@ const BLOCCATI = [
   'git push origin main', 'git push origin HEAD:main', 'git push origin HEAD:refs/heads/main',
   'git push origin refs/heads/main', "git push origin 'main'", 'git push origin "HEAD:main"',
   "bash -c 'git push origin main'", 'sh -c "gh pr merge 4"', "eval 'git push --force origin x'",
+  'git push origin HEAD:"main"', "git push origin HEAD:'refs/heads/main'", "git push origin ma''in",
+  'bash -c "git push origin \\"HEAD:main\\""',
   `git -C ${repo} push origin main`, 'git -c push.negotiate=true push origin main',
   'git push --force origin x', 'git push -f origin x', 'git push -uf origin x', 'git push origin +lavoro',
   'git push --force-with-lease origin x', 'git push', 'git push -u origin HEAD',
@@ -107,6 +109,12 @@ test('controlli di sicurezza: repository pulito superato, credenziali rifiutate'
   }
 });
 
+test('hook: nessun rallentamento esponenziale con molte opzioni', () => {
+  const t0 = Date.now();
+  assert.equal(bash('git' + ' --a'.repeat(40) + ' status'), 0);
+  assert.ok(Date.now() - t0 < 2000, `${Date.now() - t0} ms`);
+});
+
 test('controlli di sicurezza: prodotto «live» senza autorizzazione datata fa fallire la CI', () => {
   const run = (cwd) => spawnSync(process.execPath, ['scripts/controlli-sicurezza.mjs'], { cwd, encoding: 'utf8' });
   const conCatalogo = (extra) => {
@@ -118,5 +126,6 @@ test('controlli di sicurezza: prodotto «live» senza autorizzazione datata fa f
   };
   assert.equal(run(conCatalogo('')).status, 1);
   assert.equal(run(conCatalogo(", live_authorization: 'ok'")).status, 1);
+  assert.equal(run(conCatalogo(", live_authorization: '9999-99-99 data non valida ma testo lungo'")).status, 1);
   assert.equal(run(conCatalogo(", live_authorization: '2026-12-01 autorizzato dal titolare per iscritto'")).status, 0);
 });

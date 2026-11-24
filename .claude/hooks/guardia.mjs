@@ -30,13 +30,15 @@ function currentBranch(dir) {
 }
 
 function checkGitPush(seg) {
-  const m = seg.match(/\bgit((?:\s+(?:-C|-c)\s+\S+|\s+--?[\w-]+(?:=\S+)?)*)\s+push\b(.*)$/);
+  // (?!-) evita il backtracking esponenziale su lunghe sequenze di opzioni («git --a --a --a ...»).
+  const m = seg.match(/\bgit((?:\s+(?:-C|-c)\s+\S+|\s+--?(?!-)[\w-]+(?:=\S+)?)*)\s+push\b(.*)$/);
   if (!m) return;
   const pre = m[1] || '';
   const args = (m[2] || '').trim().split(/\s+/).filter(Boolean);
   if (args.some((a) => /^--force(?:-with-lease|-if-includes)?(?:=.*)?$/.test(a) || /^-[a-zA-Z]*f[a-zA-Z]*$/.test(a) || /^\+/.test(a))) deny('push forzato');
-  // Virgolette e prefisso refs/heads/ non cambiano la destinazione: «'main'», «"HEAD:main"», «refs/heads/main».
-  const refs = args.filter((a) => !a.startsWith('-')).map((a) => a.replace(/^["']+|["']+$/g, ''));
+  // Virgolette (anche interne o con barra rovesciata) e prefisso refs/heads/ non cambiano la destinazione:
+  // «'main'», «"HEAD:main"», «HEAD:'refs/heads/main'», «ma''in», «refs/heads/main».
+  const refs = args.filter((a) => !a.startsWith('-')).map((a) => a.replace(/\\?["']/g, ''));
   const isMain = (r) => /^(?:refs\/heads\/)?(?:main|master)$/.test(r) || /:(?:refs\/heads\/)?(?:main|master)$/.test(r);
   if (refs.slice(1).some(isMain) || (refs.length === 1 && isMain(refs[0]))) deny('push su main');
   if (refs.length <= 1 || refs.slice(1).every((r) => r === 'HEAD')) {

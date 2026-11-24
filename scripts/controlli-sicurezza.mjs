@@ -74,9 +74,12 @@ if (existsSync(catalog)) {
     // Un prodotto «live» fa fallire la CI se non riporta l'autorizzazione scritta e datata del titolare
     // (campo live_authorization: "AAAA-MM-GG — testo dell'autorizzazione").
     if (p.status === 'live') {
-      if (typeof p.live_authorization === 'string' && /^\d{4}-\d{2}-\d{2}\b.{10,}/.test(p.live_authorization)) {
+      const auth = typeof p.live_authorization === 'string' ? p.live_authorization : '';
+      const day = auth.slice(0, 10), d = new Date(day + 'T00:00:00Z');
+      const validDate = /^\d{4}-\d{2}-\d{2}$/.test(day) && !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === day;
+      if (validDate && auth.length >= 21) {
         warnings++;
-        console.log(`::warning file=catalog/products.mjs::Il prodotto ${p.sku} è in vendita reale (autorizzazione: ${p.live_authorization.slice(0, 80)}).`);
+        console.log(`::warning file=catalog/products.mjs::Il prodotto ${p.sku} è in vendita reale (autorizzazione: ${auth.slice(0, 80)}).`);
       } else {
         problems.push(`Il prodotto ${p.sku} è marcato "live" senza live_authorization datata del titolare.`);
       }
