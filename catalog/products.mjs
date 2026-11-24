@@ -60,6 +60,23 @@ export const PRODUCTS = [
     delivery: { kind: "license" },
     return_url: "https://dpa-studio.netlify.app/app",
     status: "sandbox"
+  },
+  {
+    // Sito e prodotto realizzati da Grok Bot (registro GROKBOT, 24/11/2026). Prezzo 9,90 € indicato
+    // da Grok Bot come approvato dal titolare. Il file va caricato nello store Blobs "files" con questa chiave.
+    sku: "forfettario-in-ordine-2026",
+    project: "SF365-001-GROK",
+    owner_ai: "Grokbot",
+    site: "https://forfettario-in-ordine.netlify.app",
+    name: "Forfettario in Ordine 2026 — kit Excel",
+    description: "Foglio di calcolo per partite IVA in regime forfettario: registro incassi, stima di imposta sostitutiva e contributi, scadenze. Include file di esempio e guida PDF. Strumento di organizzazione, non consulenza fiscale.",
+    type: "one_time",
+    price: "9.90",
+    currency: "EUR",
+    tax_category: "standard",
+    delivery: { kind: "download", file: "sf365/forfettario-in-ordine-2026-v1.0.zip" },
+    return_url: "https://forfettario-in-ordine.netlify.app/",
+    status: "sandbox"
   }
 ];
 

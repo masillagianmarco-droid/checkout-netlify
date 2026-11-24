@@ -213,7 +213,10 @@ export default async function checkout(request, context) {
   const session = isReturn ? getSession(request, nonce, orderId, payment.secret) : null;
   if (isReturn && !session) return page('Sessione non valida', '<p>Riapri il link al checkout.</p>', 400, payment.live);
   let confirmedOrder;
-  if (payment.live && !isReturn) {
+  // Il link dell'ordine confermato resta obbligatorio per le offerte storiche (OspitaBene e kit digitali).
+  // I prodotti SITE FACTORY 365 in Live sono già filtrati da sellable(): autorizzazione del titolare
+  // (LIVE_PAYMENTS_APPROVED) e status "live" nel catalogo. Senza questa eccezione non sarebbero acquistabili.
+  if (payment.live && !isReturn && !offer?.sf365) {
     confirmedOrder = readConfirmedOrder(url.searchParams.get('ordine'), offerId, payment.signingKey);
     if (!confirmedOrder) {
       return page('Serve il link dell’ordine confermato', '<p>Usa il link che hai ricevuto dopo la conferma dell’ordine.</p>', 403, true);
