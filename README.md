@@ -38,4 +38,10 @@ La consegna per OspitaBene è manuale. I prodotti digitali dovranno essere confi
 | Kit Ospitalità Completo | `ospitabene-kit-completo` | 99,00 EUR |
 | Kit Ospitalità Completo, promozione su conferma | `ospitabene-kit-completo-lancio` | 49,00 EUR |
 
-La promozione richiede la conferma della disponibilità prima di emettere il link. Per Recensioni Serene, a 19 EUR al mese, occorre un piano di abbonamento con gestione delle disdette. Il modulo OspitaBene continua a raccogliere le richieste di preventivo.
+La promozione richiede la conferma della disponibilità prima di emettere il link. Il modulo OspitaBene raccoglie le richieste di preventivo.
+
+## Abbonamenti OspitaBene
+
+Recensioni Serene costa 19,00 EUR al mese. Configura il piano con la stessa app e la stessa chiave di firma già caricate per il checkout condiviso. Su un ambiente con la chiave disponibile, esegui `node scripts/configura-piano.mjs https://il-tuo-checkout.netlify.app ospitabene-recensioni-serene sandbox` per il piano di prova. Il terzo argomento `live` configura il piano reale dopo la verifica.
+
+Dopo aver confermato una richiesta, usa lo script `crea-link-ordine.mjs` con il codice `ospitabene-recensioni-serene`. PayPal mostra l’importo, il rinnovo e l’autorizzazione prima dell’adesione. Il cliente può disdire da PayPal o contattando il servizio. Verifica nel pannello PayPal lo stato dell’abbonamento e degli incassi prima di erogare o rinnovare il servizio.
