@@ -128,6 +128,42 @@ export const PRODUCTS = [
     delivery: { kind: "download", file: "sf365/forfettario-in-ordine-2026-v1.0.zip" },
     return_url: "https://forfettario-in-ordine.netlify.app/",
     status: "sandbox"
+  },
+  {
+    // AF365-20261124-GROK (Grok Bot, 24/11/2026). Prezzo 9,90 € APPROVATO dal titolare (registro GROKBOT 24/11 18:23).
+    // Prodotto stagionale: utile fino al saldo IMU del 16/12/2026; dopo quella data portarlo a "draft".
+    // File da caricare: saldo-imu-2026-v1.0.zip (consegna cliente: XLSX + PDF + LEGGIMI), 103957 byte,
+    // SHA-256 905e9eb93e09df9c66a2fcfd9be182726d43183318f4a35c9e0c40c70323a7dd (NON il pacchetto interno del 24/11).
+    sku: "af365-20261124-saldo-imu",
+    project: "AF365-20261124-GROK",
+    owner_ai: "Grokbot",
+    site: "https://saldo-imu-2026.netlify.app",
+    name: "Saldo IMU 16 dicembre 2026 — foglio di calcolo e guida",
+    description: "Foglio Excel/Calc con formule e guida PDF per calcolare il saldo IMU del 16/12/2026 come conguaglio rispetto all'acconto, con prospetto F24 (codici tributo dell'Agenzia delle Entrate), ripartizione per il gruppo D e cinque esempi. Strumento di calcolo, non consulenza fiscale.",
+    type: "one_time",
+    price: "9.90",
+    currency: "EUR",
+    tax_category: "standard",
+    delivery: { kind: "download", file: "sf365/saldo-imu-2026-v1.0.zip" },
+    return_url: "https://saldo-imu-2026.netlify.app/",
+    status: "sandbox"
+  },
+  {
+    // AF365-20261125-GROK (Grok Bot, 25/11/2026). Prezzo 5,90 € deciso da Grok Bot (decisione ordinaria delegata).
+    // File: ProvaOrale-Kit-in-coppia_v1.0.pdf, 404987 byte, SHA-256 bada109fb6df00fb67808add54f8d6c70e446700b2c4135837b5ef9ca96d6001
+    sku: "provaorale-kit-coppia-1",
+    project: "AF365-20261125-GROK",
+    owner_ai: "Grokbot",
+    site: "https://lively-croissant-4a8ae9.netlify.app",
+    name: "ProvaOrale — Kit di esercizio in coppia (PDF)",
+    description: "PDF A4 stampabile di 14 pagine per simulare l'esame orale con un compagno di studio o in tre: ruoli di candidato, esaminatore e osservatore, scalette da 20, 45 e 60 minuti, cartellini per le domande, griglia di osservazione, scheda di feedback e registro delle sessioni. Per qualsiasi materia. Uso personale.",
+    type: "one_time",
+    price: "5.90",
+    currency: "EUR",
+    tax_category: "standard",
+    delivery: { kind: "download", file: "sf365/provaorale-kit-coppia-v1.0.pdf" },
+    return_url: "https://lively-croissant-4a8ae9.netlify.app/",
+    status: "sandbox"
   }
 ];
 
