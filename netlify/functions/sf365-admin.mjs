@@ -1,6 +1,6 @@
 // Amministrazione (solo con ADMIN_TOKEN): sincronizzazione cataloghi, registro, file, revoche e riattivazioni.
 import { PRODUCTS, findProduct, validateCatalog } from "../../catalog/products.mjs";
-import { json, isAdmin, getJSON, setJSON, listKeys, store, setLicenseStatus, mode, recordTransaction, FINAL_STATUSES, syncSubscriptionLicense } from "../../lib/sf365/core.mjs";
+import { withCheckoutStorage, json, isAdmin, getJSON, setJSON, listKeys, store, setLicenseStatus, mode, recordTransaction, FINAL_STATUSES, syncSubscriptionLicense } from "../../lib/sf365/core.mjs";
 import * as PD from "../../lib/sf365/paddle.mjs";
 
 async function syncPaddle(context) {
@@ -30,7 +30,7 @@ async function dump(name, prefix) {
   return rows;
 }
 
-export default async (req, context) => {
+export default withCheckoutStorage(async (req, context) => {
   if (!isAdmin(req)) return json({ error: "non_autorizzato" }, 401);
   const a = context.params.action;
   try {
@@ -93,6 +93,6 @@ export default async (req, context) => {
   } catch (e) {
     return json({ error: String(e && e.message || e) }, 500);
   }
-};
+});
 
 export const config = { path: "/api/admin/:action" };

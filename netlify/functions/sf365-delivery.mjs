@@ -1,10 +1,10 @@
 // Consegna automatica: dati della consegna e scaricamento del file (se previsto dal prodotto).
 import { findProduct, publicProduct } from "../../catalog/products.mjs";
-import { json, getJSON, setJSON, store, FINAL_STATUSES, usableInThisMode } from "../../lib/sf365/core.mjs";
+import { withCheckoutStorage, json, getJSON, setJSON, store, FINAL_STATUSES, usableInThisMode } from "../../lib/sf365/core.mjs";
 
 const MAX_DOWNLOADS = 10;
 
-export default async (req, context) => {
+export default withCheckoutStorage(async (req, context) => {
   const token = String(context.params.token || "");
   if (!/^[A-Za-z0-9_-]{20,64}$/.test(token)) return json({ error: "token_non_valido" }, 400);
   const d = await getJSON("deliveries", token);
@@ -39,6 +39,6 @@ export default async (req, context) => {
   await setJSON("deliveries", token, d);
   const name = d.file.split("/").pop().replace(/[^A-Za-z0-9._-]/g, "_");
   return new Response(blob, { headers: { "content-type": "application/octet-stream", "content-disposition": `attachment; filename="${name}"`, "cache-control": "no-store" } });
-};
+});
 
 export const config = { path: ["/api/delivery/:token", "/d/:token"], method: ["GET"] };

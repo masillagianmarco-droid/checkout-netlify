@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 
 import { getVerifiedPlan, matchesSignature, paypalJson, periodLabel, planIdPattern, provisionPlan, signature, subscriptionIdPattern, subscriptions } from '../../lib/abbonamenti-paypal.mjs';
 import { findProduct } from '../../catalog/products.mjs';
-import { fulfil, recordTransaction, safely, sellable } from '../../lib/sf365/core.mjs';
+import { withCheckoutStorage, fulfil, recordTransaction, safely, sellable } from '../../lib/sf365/core.mjs';
 import { readConfirmedOrder } from '../../lib/ordine-confermato.mjs';
 import { page, paymentSettings, paypalAccessToken } from '../../lib/paypal.mjs';
 import { reserveOrder } from '../../lib/registro-ordini.mjs';
@@ -112,7 +112,7 @@ async function viewResult(request, url, payment, offerId, offer) {
     `<p>PayPal ha confermato il primo pagamento per ${offer.name}.</p><p>Per contattare OspitaBene o chiedere la disdetta, scrivi a <a href="mailto:${offer.contact}">${offer.contact}</a>.</p>`, 200, payment.live);
 }
 
-export default async function subscription(request, context) {
+async function subscription(request, context) {
   const url = new URL(request.url);
   const offerId = url.searchParams.get('offerta');
   const offer = subscriptions.get(offerId);
@@ -172,5 +172,7 @@ export default async function subscription(request, context) {
     return page('Verifica PayPal necessaria', '<p>Controlla lo stato in PayPal o contatta OspitaBene.</p>', 502, payment.live);
   }
 }
+
+export default withCheckoutStorage(subscription);
 
 export const config = { path: ['/abbonamento', '/abbonamento/ritorno', '/abbonamento/annullato', '/abbonamento/configura'] };

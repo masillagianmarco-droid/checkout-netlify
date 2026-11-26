@@ -1,6 +1,6 @@
 // Webhook PayPal verificati: registro centralizzato di tutte le vendite del checkout, revoca delle licenze SF365.
 import { findProduct } from '../../catalog/products.mjs';
-import { getJSON, json, listKeys, recordTransaction, setJSON, setLicenseStatus, staleLifecycle, syncSubscriptionLicense } from '../../lib/sf365/core.mjs';
+import { withCheckoutStorage, getJSON, json, listKeys, recordTransaction, setJSON, setLicenseStatus, staleLifecycle, syncSubscriptionLicense } from '../../lib/sf365/core.mjs';
 import { verifyWebhook } from '../../lib/sf365/paypal-webhook.mjs';
 
 // Ricerca tramite indice (scritto alla cattura e al pagamento); lettura completa del registro solo per i record
@@ -19,7 +19,7 @@ async function byIndex(name, id, prefix, match) {
 const byCapture = (captureId) => byIndex('capture', captureId, 'paypal:', (tx) => tx.capture_id === captureId);
 const bySale = (saleId) => byIndex('sale', saleId, 'paypal-sub:', (tx) => tx.last_payment?.id === saleId || (tx.paid_sales || []).includes(saleId));
 
-export default async (req, context) => {
+export default withCheckoutStorage(async (req, context) => {
   if (req.method !== 'POST') return json({ error: 'metodo' }, 405);
   const raw = await req.text();
   let v;
@@ -89,6 +89,6 @@ export default async (req, context) => {
       await recordTransaction({ provider: 'paypal-evento', id: ev.id, status: 'ricevuto', events: [log] });
   }
   return json({ ok: true });
-};
+});
 
 export const config = { path: '/api/paypal/webhook' };

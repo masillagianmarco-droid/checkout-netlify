@@ -1,6 +1,6 @@
 // Paddle (alternativa): webhook firmati e recupero della consegna dopo il checkout.
 import { findProduct } from "../../catalog/products.mjs";
-import { json, env, recordTransaction, fulfil, getJSON, setLicenseStatus, sellable, syncSubscriptionLicense, staleLifecycle } from "../../lib/sf365/core.mjs";
+import { withCheckoutStorage, json, env, recordTransaction, fulfil, getJSON, setLicenseStatus, sellable, syncSubscriptionLicense, staleLifecycle } from "../../lib/sf365/core.mjs";
 import { verifySignature } from "../../lib/sf365/paddle.mjs";
 
 async function webhook(req, context) {
@@ -107,7 +107,7 @@ async function delivery(req) {
   return json({ status: "completato", sku: tx.sku, license: tx.license, delivery_token: tx.delivery_token });
 }
 
-export default async (req, context) => {
+export default withCheckoutStorage(async (req, context) => {
   try {
     if (context.params.action === "webhook" && req.method === "POST") return await webhook(req, context);
     if (context.params.action === "delivery" && req.method === "GET") return await delivery(req);
@@ -115,6 +115,6 @@ export default async (req, context) => {
   } catch (e) {
     return json({ error: "errore_interno" }, 500);
   }
-};
+});
 
 export const config = { path: "/api/paddle/:action" };

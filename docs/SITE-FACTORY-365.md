@@ -20,6 +20,10 @@ Questo repository è l'**unica infrastruttura di pagamento** di SITE FACTORY 365
 
 Le offerte già presenti (OspitaBene, Skywatcher, StudyGrid, Patentino IA) mantengono codice, percorsi e regole: i 17 test originali restano verdi.
 
+## Isolamento delle anteprime
+
+Le Functions usano gli archivi `sf365-sandbox-*` nelle anteprime e nei deploy di ramo. Il deploy di produzione mantiene gli archivi `sf365-*` e le offerte storiche conservano i loro archivi dedicati. Carica le copie dei prodotti di prova in `sf365-sandbox-files`. Un’anteprima indirizza PayPal e Paddle ai rispettivi ambienti di prova.
+
 ## Variabili d'ambiente (solo nel pannello Netlify, mai in chat o nel repository)
 
 Già usate: `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` (app Sandbox «Checkout siti Netlify»), `PAYPAL_LIVE_CLIENT_ID`, `PAYPAL_LIVE_CLIENT_SECRET`, `PAYPAL_LIVE_ENABLED`, `CHECKOUT_ORDER_SIGNING_KEY`.

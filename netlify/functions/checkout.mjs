@@ -5,7 +5,7 @@ import { page, paymentSettings, paypalAccessToken } from '../../lib/paypal.mjs';
 import { readConfirmedOrder } from '../../lib/ordine-confermato.mjs';
 import { reserveOrder } from '../../lib/registro-ordini.mjs';
 import { PRODUCTS, findProduct } from '../../catalog/products.mjs';
-import { fulfil, recordTransaction, safely, sellable } from '../../lib/sf365/core.mjs';
+import { withCheckoutStorage, fulfil, recordTransaction, safely, sellable } from '../../lib/sf365/core.mjs';
 
 // Prodotti SITE FACTORY 365 con pagamento unico: stessi controlli del checkout esistente, più licenza e registro.
 const sf365Offers = PRODUCTS.filter(p => p.type === 'one_time' && p.status !== 'draft')
@@ -183,7 +183,7 @@ async function completeCheckout(orderId, nonce, session, token, payment, url) {
   return page('Pagamento da verificare', '<p>PayPal indica che il pagamento non è ancora completato.</p>', 202, payment.live);
 }
 
-export default async function checkout(request, context) {
+async function checkout(request, context) {
   const url = new URL(request.url);
   const isDownload = url.pathname === '/checkout/download';
   const isReturn = url.pathname === '/checkout/ritorno' || isDownload;
@@ -268,5 +268,7 @@ ${digital ? `<p>${digital.help}</p><p>Il link di download è disponibile dopo la
     return page('Verifica PayPal necessaria', '<p>Controlla lo stato in PayPal o riprova dalla stessa pagina.</p>', 502, payment.live);
   }
 }
+
+export default withCheckoutStorage(checkout);
 
 export const config = { path: ['/checkout', '/checkout/ritorno', '/checkout/annullato', '/checkout/download', '/checkout/carica-prodotto'] };
