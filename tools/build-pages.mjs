@@ -34,6 +34,11 @@ const foot = `<footer><div class="wrap" style="display:flex;flex-wrap:wrap;gap:1
 <span><a href="/termini-vendita.html">Condizioni di vendita</a> · <a href="/rimborsi.html">Rimborsi</a> · <a href="/privacy.html">Privacy</a> · <a href="/contatti.html">Contatti</a></span></div></footer></body></html>
 `;
 
+const actionLabel = (p) => {
+  if (p.status === "sandbox") return "Prova in Sandbox";
+  return p.type === "subscription" ? "Abbonati" : "Acquista";
+};
+
 const cards = PRODUCTS.filter((p) => p.status !== "draft").map((p) => `
 <article class="card prod">
   <h3>${esc(p.name)}</h3>
@@ -41,7 +46,7 @@ const cards = PRODUCTS.filter((p) => p.status !== "draft").map((p) => `
   <p class="price">${eur(p.price)}<span class="per">${period(p)}</span></p>
   <p class="small muted">${kind(p)}. Prezzo IVA inclusa per i consumatori. ${consegna(p)}</p>
   <p class="small">Sito del prodotto: <a href="${esc(p.site)}">${esc(p.site.replace("https://", ""))}</a></p>
-  <a class="btn accent" href="${p.type === "subscription" ? "/abbonamento" : "/checkout"}?offerta=${esc(p.sku)}">${p.type === "subscription" ? "Abbonati" : "Acquista"}</a>
+  <a class="btn accent" href="${p.type === "subscription" ? "/abbonamento" : "/checkout"}?offerta=${esc(p.sku)}">${actionLabel(p)}</a>
 </article>`).join("");
 
 writeFileSync("public/index.html", head("SITE FACTORY 365 — Software e strumenti digitali professionali", "Negozio ufficiale dei software e degli strumenti digitali SITE FACTORY 365: licenze e abbonamenti con consegna immediata.") + `

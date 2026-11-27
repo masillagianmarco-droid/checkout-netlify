@@ -164,6 +164,24 @@ export const PRODUCTS = [
     delivery: { kind: "download", file: "sf365/provaorale-kit-coppia-v1.0.pdf" },
     return_url: "https://lively-croissant-4a8ae9.netlify.app/",
     status: "sandbox"
+  },
+  {
+    // AF365-20261124-GPT. Prezzo proposto per il collaudo, ingresso candidato StudyGrid.
+    // File cliente v1.1.1: SHA-256 c681da595e50443a57ed6cc4ee859b71eb3f9f2d990015565f467d4652c6dc5f.
+    // Conservare il file nell'archivio Netlify Blobs sf365-sandbox-files, fuori dal repository.
+    sku: "provaorale-1",
+    project: "AF365-20261124-GPT",
+    owner_ai: "ChatGPT",
+    site: "https://comfy-cascaron-422ceb.netlify.app",
+    name: "ProvaOrale Individuale — Simulatore di esami orali offline",
+    description: "Simulatore offline per esercitarsi agli esami orali. Include domande personalizzabili, timer, scheda di autovalutazione, ripasso, storico, esportazione CSV e backup JSON. File HTML per un computer con browser recente. Uso personale.",
+    type: "one_time",
+    price: "9.90",
+    currency: "EUR",
+    tax_category: "standard",
+    delivery: { kind: "download", file: "sf365/provaorale-v1.1.1.zip" },
+    return_url: "https://comfy-cascaron-422ceb.netlify.app/",
+    status: "sandbox"
   }
 ];
 

@@ -1,4 +1,4 @@
-// AF365 Grok Bot (26/11/2026): Saldo IMU (AF365-20261124-GROK) e Kit in coppia (AF365-20261125-GROK).
+// Offerte AF365 a download: Saldo IMU, ProvaOrale in coppia e ProvaOrale Individuale.
 // Solo Sandbox, consegna a download senza licenza, prezzo dal catalogo, file reale caricato in Blobs "files".
 import assert from 'node:assert/strict';
 import { test, after } from 'node:test';
@@ -53,15 +53,18 @@ function mockPayPal(sku, orderId, value) {
 }
 
 const CASES = [
-  { sku: 'af365-20261124-saldo-imu', project: 'AF365-20261124-GROK', price: '9.90', label: /9,90 €/,
+  { sku: 'af365-20261124-saldo-imu', project: 'AF365-20261124-GROK', owner: 'Grokbot', price: '9.90', label: /9,90 €/,
     file: 'sf365/saldo-imu-2026-v1.0.zip', disp: /saldo-imu-2026-v1\.0\.zip/, orderId: 'SALDOIMU012345678',
     fixture: process.env.AF365_FILE_SALDO_IMU },
-  { sku: 'provaorale-kit-coppia-1', project: 'AF365-20261125-GROK', price: '5.90', label: /5,90 €/,
+  { sku: 'provaorale-kit-coppia-1', project: 'AF365-20261125-GROK', owner: 'Grokbot', price: '5.90', label: /5,90 €/,
     file: 'sf365/provaorale-kit-coppia-v1.0.pdf', disp: /provaorale-kit-coppia-v1\.0\.pdf/, orderId: 'KITCOPPIA01234567',
     fixture: process.env.AF365_FILE_KIT_COPPIA },
+  { sku: 'provaorale-1', project: 'AF365-20261124-GPT', owner: 'ChatGPT', price: '9.90', label: /9,90 €/,
+    file: 'sf365/provaorale-v1.1.1.zip', disp: /provaorale-v1\.1\.1\.zip/, orderId: 'PROVAORALE0123456',
+    fixture: process.env.AF365_FILE_PROVAORALE },
 ];
 
-test('catalogo valido; voci Grok Bot in sandbox, download, prezzo deciso', () => {
+test('catalogo valido; offerte AF365 in Sandbox, prezzi e download configurati', () => {
   assert.deepEqual(validateCatalog(), []);
   for (const c of CASES) {
     const p = findProduct(c.sku);
@@ -72,7 +75,7 @@ test('catalogo valido; voci Grok Bot in sandbox, download, prezzo deciso', () =>
     assert.equal(p.delivery.kind, 'download');
     assert.equal(p.delivery.file, c.file);
     assert.equal(p.project, c.project);
-    assert.equal(p.owner_ai, 'Grokbot');
+    assert.equal(p.owner_ai, c.owner);
   }
 });
 
