@@ -285,6 +285,25 @@ test('amministrazione: token obbligatorio, registro esportabile in CSV', async (
   assert.match(await r.text(), /rimborsato/);
 });
 
+test('amministrazione: gli errori di archiviazione restituiscono un messaggio generico', async (t) => {
+  t.mock.method(console, 'error', () => {});
+  const originalToken = process.env.ADMIN_TOKEN;
+  const token = 'z'.repeat(32);
+  process.env.ADMIN_TOKEN = token;
+  const originalStore = globalThis.__SF365_TEST_STORE__;
+  globalThis.__SF365_TEST_STORE__ = () => { throw new Error('Dettaglio interno di archiviazione'); };
+  try {
+    const headers = { authorization: 'Bearer ' + token };
+    const response = await adminFn(req('/api/admin/transactions', 'GET', headers), { params: { action: 'transactions' } });
+    assert.equal(response.status, 500);
+    assert.deepEqual(await response.json(), { error: 'errore_interno' });
+  } finally {
+    globalThis.__SF365_TEST_STORE__ = originalStore;
+    if (originalToken === undefined) delete process.env.ADMIN_TOKEN;
+    else process.env.ADMIN_TOKEN = originalToken;
+  }
+});
+
 test('catalogo pubblico con i collegamenti di acquisto', async () => {
   const j = await (await apiFn(req('/api/catalog'), {})).json();
   assert.ok(j.products.some((p) => p.buy === `/checkout?offerta=${sku}`));

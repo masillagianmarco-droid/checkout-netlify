@@ -90,8 +90,9 @@ export default withCheckoutStorage(async (req, context) => {
       return json({ ok: true, file: p.delivery.file, bytes: buf.byteLength });
     }
     return json({ error: "azione_sconosciuta" }, 404);
-  } catch (e) {
-    return json({ error: String(e && e.message || e) }, 500);
+  } catch {
+    console.error("[sf365] Operazione amministrativa non riuscita");
+    return json({ error: "errore_interno" }, 500);
   }
 });
 
