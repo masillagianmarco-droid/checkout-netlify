@@ -1,0 +1,120 @@
+// Paddle (alternativa): webhook firmati e recupero della consegna dopo il checkout.
+import { findProduct } from "../../catalog/products.mjs";
+import { withCheckoutStorage, json, env, recordTransaction, fulfil, getJSON, setLicenseStatus, sellable, syncSubscriptionLicense, staleLifecycle } from "../../lib/sf365/core.mjs";
+import { verifySignature } from "../../lib/sf365/paddle.mjs";
+
+async function webhook(req, context) {
+  const raw = await req.text();
+  const ok = await verifySignature(req.headers.get("paddle-signature"), raw, env("PADDLE_WEBHOOK_SECRET"));
+  if (!ok) return json({ error: "firma_non_valida" }, 400);
+  const ev = JSON.parse(raw);
+  const d = ev.data || {}, now = new Date().toISOString();
+  const log = { at: now, type: "webhook:" + ev.event_type, detail: ev.event_id };
+  const sku = d.custom_data && d.custom_data.sku;
+  switch (ev.event_type) {
+    case "transaction.completed": {
+      const p = findProduct(sku);
+      if (!p || !sellable(p, "paddle", context).ok) { await recordTransaction({ provider: "paddle", id: d.id, sku: sku || null, status: "da_verificare", events: [log] }); break; }
+      const items = d.items || [];
+      const ids = (await getJSON("provider-ids", p.sku)) || {};
+      // Lo sku arriva da custom_data, che il browser può impostare: la consegna parte solo se la transazione
+      // contiene il prezzo Paddle registrato per quello sku (sync-paddle). Senza prezzo registrato non si consegna.
+      if (!ids.paddle_price_id || !items.some((i) => i.price && i.price.id === ids.paddle_price_id)) {
+        await recordTransaction({ provider: "paddle", id: d.id, sku: p.sku, status: "da_verificare", events: [{ ...log, detail: ids.paddle_price_id ? "prezzo_non_corrispondente" : "prezzo_non_registrato" }] });
+        break;
+      }
+      // Prima di registrare: questo pagamento è nuovo? Un evento già ricevuto e riconsegnato non deve contare
+      // come pagamento successivo (non toglie blocchi, non aggiorna l'ultimo pagamento).
+      const before = await getJSON("transactions", `paddle:${d.id}`);
+      const fresh = !before || before.status === "da_verificare";
+      const totals = (d.details && d.details.totals) || {};
+      await recordTransaction({ provider: "paddle", id: d.id, sku: p.sku, project: p.project, status: "completato", amount: totals.grand_total || null, currency: d.currency_code, subscription_id: d.subscription_id || null, mode: sellable(p, "paddle", context).mode, events: [log] });
+      // Rinnovo di un abbonamento che ha già la sua licenza: nessuna licenza nuova. Un pagamento nuovo e riuscito
+      // toglie l'eventuale blocco lasciato dal rimborso o dallo storno del pagamento precedente.
+      const sub = d.subscription_id ? await getJSON("transactions", `paddle-sub:${d.subscription_id}`) : null;
+      if (sub && sub.license) {
+        if (fresh) {
+          // Il pagamento toglie il blocco per rimborso; lo stato «attivo» si applica solo se il rinnovo non è più
+          // vecchio dell'ultimo evento del ciclo di vita (per esempio una disdetta successiva).
+          const lifecycle = staleLifecycle(sub, ev.occurred_at) ? {} : { status: "attivo", ...(ev.occurred_at && { lifecycle_at: ev.occurred_at }) };
+          await recordTransaction({ provider: "paddle-sub", id: d.subscription_id, ...lifecycle, last_payment_txn: d.id, payment_hold: null, events: [{ ...log, detail: "rinnovo:" + d.id }] });
+          await syncSubscriptionLicense("paddle-sub", d.subscription_id);
+        }
+        break;
+      }
+      const out = await fulfil({ provider: "paddle", id: d.id, product: p, expiresAt: p.type === "subscription" ? null : undefined, mode: sellable(p, "paddle", context).mode });
+      if (!out || out.blocked) break; // pagamento già rimborsato o stornato: nessuna consegna
+      if (d.subscription_id) await recordTransaction({ provider: "paddle-sub", id: d.subscription_id, sku: p.sku, status: "attivo", license: out.license, last_payment_txn: d.id, ...(ev.occurred_at && { lifecycle_at: ev.occurred_at }), events: [log] });
+      break;
+    }
+    case "subscription.canceled":
+    case "subscription.paused":
+    case "subscription.past_due":
+    case "subscription.activated":
+    case "subscription.resumed": {
+      const st = { canceled: "canceled", paused: "paused", past_due: "past_due", activated: "attivo", resumed: "attivo" }[ev.event_type.split(".")[1]];
+      // Un evento arrivato in ritardo (più vecchio dell'ultimo applicato) si registra ma non cambia lo stato.
+      const cur = await getJSON("transactions", `paddle-sub:${d.id}`);
+      if (staleLifecycle(cur, ev.occurred_at)) { await recordTransaction({ provider: "paddle-sub", id: d.id, events: [{ ...log, detail: "fuori_ordine:" + ev.event_id }] }); break; }
+      await recordTransaction({ provider: "paddle-sub", id: d.id, status: st, ...(ev.occurred_at && { lifecycle_at: ev.occurred_at }), events: [log] });
+      await syncSubscriptionLicense("paddle-sub", d.id);
+      break;
+    }
+    case "adjustment.created":
+    case "adjustment.updated": {
+      if (!d.transaction_id) break;
+      const tx = await getJSON("transactions", `paddle:${d.transaction_id}`);
+      const refund = d.action === "refund" && d.status === "approved";
+      const chargeback = d.action === "chargeback" && d.status !== "rejected";
+      const reverse = d.action === "chargeback_reverse" && d.status !== "rejected";
+      if (refund || chargeback) {
+        // Rimborso approvato oppure storno non respinto: consegna chiusa; licenza revocata o abbonamento bloccato.
+        // Un acquisto già rimborsato resta «rimborsato» anche se poi arriva uno storno: così l'annullamento
+        // dello storno non lo riapre.
+        await recordTransaction({ provider: "paddle", id: d.transaction_id, status: refund || (tx && tx.status === "rimborsato") ? "rimborsato" : "stornato", events: [log] });
+        const sub = tx && tx.subscription_id ? await getJSON("transactions", `paddle-sub:${tx.subscription_id}`) : null;
+        if (sub && sub.license) {
+          // Blocca l'abbonamento solo se è stato rimborsato il pagamento che copre il periodo in corso.
+          const latest = !sub.last_payment_txn || sub.last_payment_txn === d.transaction_id;
+          await recordTransaction({ provider: "paddle-sub", id: tx.subscription_id, ...(latest && { payment_hold: d.transaction_id }), events: [{ ...log, detail: (refund ? "rimborso:" : "storno:") + d.transaction_id }] });
+          await syncSubscriptionLicense("paddle-sub", tx.subscription_id);
+        } else if (tx && tx.license) await setLicenseStatus(tx.license, "revoked");
+      } else if (reverse && tx && tx.status === "stornato") {
+        // Storno annullato a favore del venditore: il pagamento torna valido.
+        await recordTransaction({ provider: "paddle", id: d.transaction_id, status: "completato", events: [{ ...log, detail: "storno_annullato" }] }, { reopen: true });
+        const sub = tx.subscription_id ? await getJSON("transactions", `paddle-sub:${tx.subscription_id}`) : null;
+        if (sub && sub.license) {
+          if (sub.payment_hold === d.transaction_id) await recordTransaction({ provider: "paddle-sub", id: tx.subscription_id, payment_hold: null, events: [{ ...log, detail: "storno_annullato:" + d.transaction_id }] });
+          await syncSubscriptionLicense("paddle-sub", tx.subscription_id);
+        } else if (tx.license) await setLicenseStatus(tx.license, "active");
+      }
+      break;
+    }
+    default:
+      await recordTransaction({ provider: "paddle-evento", id: ev.event_id || crypto.randomUUID(), status: "ricevuto", events: [log] });
+  }
+  return json({ ok: true });
+}
+
+// Il browser, dopo checkout.completed, interroga la consegna creata dal webhook.
+async function delivery(req) {
+  const txn = new URL(req.url).searchParams.get("txn") || "";
+  if (!/^txn_[a-z0-9]{10,40}$/.test(txn)) return json({ error: "transazione_non_valida" }, 400);
+  const tx = await getJSON("transactions", `paddle:${txn}`);
+  if (!tx || tx.status !== "completato" || !tx.delivery_token) return json({ status: tx ? tx.status : "in_attesa" }, 202);
+  // la consegna tramite id di transazione è disponibile solo nell'ora successiva al pagamento
+  if (Date.now() - new Date(tx.created_at).getTime() > 3600000) return json({ error: "finestra_scaduta" }, 410);
+  return json({ status: "completato", sku: tx.sku, license: tx.license, delivery_token: tx.delivery_token });
+}
+
+export default withCheckoutStorage(async (req, context) => {
+  try {
+    if (context.params.action === "webhook" && req.method === "POST") return await webhook(req, context);
+    if (context.params.action === "delivery" && req.method === "GET") return await delivery(req);
+    return json({ error: "azione_sconosciuta" }, 404);
+  } catch (e) {
+    return json({ error: "errore_interno" }, 500);
+  }
+});
+
+export const config = { path: "/api/paddle/:action" };

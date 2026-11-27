@@ -45,3 +45,7 @@ La promozione richiede la conferma della disponibilità prima di emettere il lin
 Recensioni Serene costa 19,00 EUR al mese. Configura il piano con la stessa app e la stessa chiave di firma già caricate per il checkout condiviso. Su un ambiente con la chiave disponibile, esegui `node scripts/configura-piano.mjs https://il-tuo-checkout.netlify.app ospitabene-recensioni-serene sandbox` per il piano di prova. Il terzo argomento `live` configura il piano reale dopo la verifica.
 
 Dopo aver confermato una richiesta, usa lo script `crea-link-ordine.mjs` con il codice `ospitabene-recensioni-serene`. PayPal mostra l’importo, il rinnovo e l’autorizzazione prima dell’adesione. Il cliente può disdire da PayPal o contattando il servizio. Verifica nel pannello PayPal lo stato dell’abbonamento e degli incassi prima di erogare o rinnovare il servizio.
+
+## SITE FACTORY 365
+
+Il checkout è anche l’infrastruttura di pagamento unica di SITE FACTORY 365 (prodotti con licenza, abbonamenti mensili e annuali, webhook, registro centralizzato, Paddle come alternativa). Vedi [docs/SITE-FACTORY-365.md](docs/SITE-FACTORY-365.md).
