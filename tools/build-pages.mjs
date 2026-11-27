@@ -12,6 +12,12 @@ const todo = (v, label) => v ? esc(v) : `<mark>${esc(label)} da completare</mark
 const eur = (p) => Number(p).toLocaleString("it-IT", { style: "currency", currency: "EUR" });
 const period = (p) => p.type === "subscription" ? (p.interval === "year" ? " / anno" : " / mese") : "";
 const kind = (p) => p.type === "subscription" ? `Abbonamento ${p.interval === "year" ? "annuale" : "mensile"} con rinnovo automatico, disdicibile in qualsiasi momento` : "Pagamento unico";
+// Testo di consegna coerente con il tipo: i prodotti a solo download non hanno chiave di licenza (rilievo Manus 24/11).
+const consegna = (p) => p.delivery.kind === "download"
+  ? "Consegna digitale immediata: link di download del file nella pagina di conferma dopo il pagamento."
+  : p.delivery.kind === "license+download"
+    ? "Consegna digitale immediata della chiave di licenza e del link di download dopo il pagamento."
+    : "Consegna digitale immediata della chiave di licenza dopo il pagamento.";
 const sellerBlock = `<p><b>${esc(SELLER.brand)}</b> — servizio di ${esc(SELLER.name)}${SELLER.legal_form ? ", " + esc(SELLER.legal_form) : ""}<br>
 Sede: ${todo(SELLER.address, "Indirizzo")}<br>Partita IVA: ${todo(SELLER.vat_id, "Partita IVA")}<br>
 Email: ${todo(SELLER.email, "Email di assistenza")}${SELLER.pec ? "<br>PEC: " + esc(SELLER.pec) : ""}</p>`;
@@ -33,7 +39,7 @@ const cards = PRODUCTS.filter((p) => p.status !== "draft").map((p) => `
   <h3>${esc(p.name)}</h3>
   <p>${esc(p.description)}</p>
   <p class="price">${eur(p.price)}<span class="per">${period(p)}</span></p>
-  <p class="small muted">${kind(p)}. Prezzo IVA inclusa per i consumatori. Consegna digitale immediata della chiave di licenza dopo il pagamento.</p>
+  <p class="small muted">${kind(p)}. Prezzo IVA inclusa per i consumatori. ${consegna(p)}</p>
   <p class="small">Sito del prodotto: <a href="${esc(p.site)}">${esc(p.site.replace("https://", ""))}</a></p>
   <a class="btn accent" href="${p.type === "subscription" ? "/abbonamento" : "/checkout"}?offerta=${esc(p.sku)}">${p.type === "subscription" ? "Abbonati" : "Acquista"}</a>
 </article>`).join("");
@@ -47,7 +53,7 @@ writeFileSync("public/index.html", head("SITE FACTORY 365 — Software e strumen
 </div></div>
 <section id="prodotti"><div class="wrap"><h2>Prodotti</h2><div class="grid3" style="margin-top:18px">${cards}</div></div></section>
 <section style="background:#fff;border-top:1px solid var(--line)"><div class="wrap grid3">
-  <div><h3>Come avviene l'acquisto</h3><p>Scegli il prodotto, accetta le condizioni e paga con PayPal o con carta. Ricevi subito la chiave di licenza nella pagina di conferma, con le istruzioni per attivarla nel software.</p></div>
+  <div><h3>Come avviene l'acquisto</h3><p>Scegli il prodotto, accetta le condizioni e paga con PayPal o con carta. Nella pagina di conferma ricevi subito la chiave di licenza (per i software) oppure il link di download (per i file digitali).</p></div>
   <div><h3>Abbonamenti</h3><p>Gli abbonamenti si rinnovano automaticamente alla fine di ogni periodo e si disdicono in qualsiasi momento dal proprio conto PayPal o dal link nella ricevuta; la licenza resta attiva fino al termine del periodo pagato.</p></div>
   <div><h3>Assistenza e rimborsi</h3><p>Per qualsiasi problema scrivi dalla <a href="/contatti.html">pagina contatti</a>. Rimborso su richiesta entro ${SELLER.refund_days} giorni dall'acquisto: vedi la <a href="/rimborsi.html">politica di rimborso</a>.</p></div>
 </div></section>
