@@ -182,6 +182,21 @@ export const PRODUCTS = [
     delivery: { kind: "download", file: "sf365/provaorale-v1.1.1.zip" },
     return_url: "https://comfy-cascaron-422ceb.netlify.app/",
     status: "sandbox"
+  },
+  {
+    sku: "tariffa-chiara-pro",
+    project: "SF365-0003",
+    owner_ai: "Claude",
+    site: "https://lively-croissant-4a8ae9.netlify.app",
+    name: "Tariffa Chiara Pro — Calcolatore e kit preventivi",
+    description: "Kit per freelance con app HTML offline, foglio di calcolo XLSX e guida PDF. Stima una tariffa minima, confronta scenari e prepara preventivi. Pagamento unico.",
+    type: "one_time",
+    price: "9.90",
+    currency: "EUR",
+    tax_category: "standard",
+    delivery: { kind: "download", file: "sf365/tariffa-chiara-pro-v1.0.0.zip" },
+    return_url: "https://lively-croissant-4a8ae9.netlify.app/",
+    status: "sandbox"
   }
 ];
 
